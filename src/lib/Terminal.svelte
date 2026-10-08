@@ -34,6 +34,10 @@
     entries.delete(tabId);
   }
 
+  // Input to type into a terminal as soon as its shell is spawned (not persisted with the layout).
+  const pending = new Map<string, string>();
+  export const queueInput = (tabId: string, data: string) => pending.set(tabId, data);
+
   export const focusTerm = (tabId: string) => entries.get(tabId)?.term.focus();
 
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {
@@ -68,7 +72,11 @@
       else term.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
     };
     invoke<number>("pty_spawn", { cwd, cols: term.cols, rows: term.rows, onData })
-      .then((id) => (e.pty = id))
+      .then((id) => {
+        e.pty = id;
+        const data = pending.get(tabId);
+        if (data) pending.delete(tabId), invoke("pty_write", { id, data });
+      })
       .catch((err) => term.write(`\x1b[31m${err}\x1b[0m\r\n`));
     term.onData((data) => e.pty !== undefined && invoke("pty_write", { id: e.pty, data }));
     term.onResize(({ cols, rows }) => e.pty !== undefined && invoke("pty_resize", { id: e.pty, cols, rows }));

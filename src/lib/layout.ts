@@ -3,7 +3,9 @@
 
 export type Tab =
   | { id: string; kind: "term"; cwd: string }
-  | { id: string; kind: "file"; path: string; preview?: boolean };
+  | { id: string; kind: "file"; path: string; preview?: boolean }
+  // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree)
+  | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string };
 export type Pane = { id: string; type: "pane"; tabs: Tab[]; active: number };
 export type Split = { id: string; type: "split"; dir: "row" | "col"; children: LNode[]; sizes: number[] };
 export type LNode = Pane | Split;

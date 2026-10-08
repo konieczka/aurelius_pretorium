@@ -57,6 +57,18 @@
   --syn-title: oklch(0.45 0.11 250);
   --syn-attr: oklch(0.48 0.09 200);
   --syn-deletion: oklch(0.5 0.14 25);
+  /* Inline diff */
+  --diff-add-bg: oklch(0.72 0.15 145 / 16%);
+  --diff-add-strong: oklch(0.72 0.15 145 / 34%);
+  --diff-add-gutter: oklch(0.6 0.14 145);
+  --diff-del-bg: oklch(0.66 0.18 25 / 13%);
+  --diff-del-strong: oklch(0.66 0.18 25 / 30%);
+  --diff-del-gutter: oklch(0.58 0.17 25);
+  /* Conflict blocks: current = green, incoming = blue (VS Code convention) */
+  --merge-ours-bg: oklch(0.72 0.15 145 / 14%);
+  --merge-ours-strong: oklch(0.72 0.15 145 / 30%);
+  --merge-theirs-bg: oklch(0.68 0.12 250 / 14%);
+  --merge-theirs-strong: oklch(0.68 0.12 250 / 30%);
 }
 
 .dark {
@@ -99,6 +111,16 @@
   --syn-title: oklch(0.78 0.1 250);
   --syn-attr: oklch(0.8 0.09 200);
   --syn-deletion: oklch(0.75 0.14 25);
+  --diff-add-bg: oklch(0.7 0.14 145 / 14%);
+  --diff-add-strong: oklch(0.7 0.14 145 / 32%);
+  --diff-add-gutter: oklch(0.72 0.13 145);
+  --diff-del-bg: oklch(0.68 0.16 25 / 14%);
+  --diff-del-strong: oklch(0.68 0.16 25 / 32%);
+  --diff-del-gutter: oklch(0.7 0.15 25);
+  --merge-ours-bg: oklch(0.7 0.14 145 / 13%);
+  --merge-ours-strong: oklch(0.7 0.14 145 / 28%);
+  --merge-theirs-bg: oklch(0.7 0.12 250 / 15%);
+  --merge-theirs-strong: oklch(0.7 0.12 250 / 32%);
 }
 
 html,

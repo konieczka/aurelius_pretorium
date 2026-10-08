@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
-import { disposeTerm } from "./Terminal.svelte";
+import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
 
 export const app = $state({
@@ -17,6 +17,9 @@ export const app = $state({
   creating: null as null | { dir: string; kind: "file" | "dir" }, // inline name input in the tree
   dropDir: "", // folder highlighted while dragging a tree entry
   selectedPath: "", // tree row ⌘⌫ deletes
+  sidebar: "files" as "files" | "git",
+  conflicts: {} as Record<string, number>, // tab id -> conflict blocks in the editor
+  gitVersion: 0, // bumped on save / git ops: diff views refetch
   treeFocused: false, // last interaction was in the sidebar: ⌘Z / ⌘⌫ go to the tree, not the editor/terminal
 });
 
@@ -64,6 +67,16 @@ export function newTerminal() {
   p.active = p.tabs.length - 1;
 }
 
+/** New terminal tab in the focused pane that runs `command` once its shell starts. */
+export function runInTerminal(cwd: string, command: string) {
+  const p = focusedPane();
+  const t: L.Tab = { id: L.uid(), kind: "term", cwd };
+  queueInput(t.id, command + "\r");
+  p.tabs.push(t);
+  p.active = p.tabs.length - 1;
+  app.focused = p.id;
+}
+
 export function splitFocused(dir: "row" | "col") {
   app.focused = L.split(app.root, focusedPane().id, dir, term()).id;
 }
@@ -73,6 +86,15 @@ export function openFile(path: string) {
   if (existing) return activate(existing.id);
   const p = focusedPane();
   p.tabs.push({ id: L.uid(), kind: "file", path, preview: path.endsWith(".md") });
+  p.active = p.tabs.length - 1;
+}
+
+/** Diff tab: staged = index vs HEAD, else working tree vs index; with `ref`, that commit's change. */
+export function openDiff(path: string, staged: boolean, orig?: string, ref?: string) {
+  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "diff" && t.path === path && t.staged === staged && t.ref === ref);
+  if (existing) return activate(existing.id);
+  const p = focusedPane();
+  p.tabs.push({ id: L.uid(), kind: "diff", path, staged, orig, ref });
   p.active = p.tabs.length - 1;
 }
 
@@ -95,9 +117,10 @@ export async function closeTab(tabId: string) {
 
 function dispose(t: L.Tab) {
   if (t.kind === "term") disposeTerm(t.id);
-  else disposeEditor(t.id);
+  else if (t.kind === "file") disposeEditor(t.id);
   delete app.dirty[t.id];
   delete app.titles[t.id];
+  delete app.conflicts[t.id];
 }
 
 const parent = (path: string) => path.slice(0, path.lastIndexOf("/"));

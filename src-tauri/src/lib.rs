@@ -25,6 +25,63 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Whitelisted env for child processes: the app's own env (e.g. npm_*/bun vars from
+/// `bun run tauri dev`) must not leak into user shells or git hooks.
+fn clean_env() -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
+        .collect();
+    // Finder-launched apps get no LANG; without it shells mangle UTF-8.
+    env.push(("LANG".into(), std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".into())));
+    env
+}
+
+/// PATH from the user's login shell (Finder-launched apps lack Homebrew, nvm, ...), resolved once.
+fn login_path() -> &'static str {
+    static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        // ponytail: an rc file that blocks on input would hang this once; no timeout.
+        std::process::Command::new(shell)
+            .args(["-ilc", r#"printf "__FC__%s__FC__" "$PATH""#])
+            .env_clear()
+            .envs(clean_env())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).split("__FC__").nth(1).map(String::from))
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".into())
+    })
+}
+
+/// Run git with an argument list (no shell). Async + blocking pool so pull/push never freeze the UI.
+#[tauri::command]
+async fn git(cwd: String, args: Vec<String>) -> Res<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(cwd)
+            .env_clear()
+            .envs(clean_env())
+            .env("PATH", login_path())
+            .env("GIT_TERMINAL_PROMPT", "0") // fail instead of waiting on a password prompt
+            .env("GIT_OPTIONAL_LOCKS", "0") // background status must not fight a terminal's git
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(err)?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            let msg = if out.stderr.is_empty() { &out.stdout } else { &out.stderr };
+            Err(String::from_utf8_lossy(msg).trim().to_string())
+        }
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 fn pty_spawn(
     ptys: State<Ptys>,
@@ -42,14 +99,10 @@ fn pty_spawn(
     // node_modules/.bin from `bun run tauri dev`) must not leak into user shells. The login
     // shell (-l) then rebuilds PATH etc. from the user's profile.
     cmd.env_clear();
-    for key in ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"] {
-        if let Ok(v) = std::env::var(key) {
-            cmd.env(key, v);
-        }
+    for (k, v) in clean_env() {
+        cmd.env(k, v);
     }
     cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
-    // Finder-launched apps get no LANG; without it shells mangle UTF-8.
-    cmd.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".into()));
     cmd.arg("-l");
     cmd.cwd(cwd);
     cmd.env("TERM", "xterm-256color");
@@ -231,7 +284,7 @@ pub fn run() {
         })
         .manage(Ptys::default())
         .invoke_handler(tauri::generate_handler![
-            pty_spawn, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path
+            pty_spawn, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path, git
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

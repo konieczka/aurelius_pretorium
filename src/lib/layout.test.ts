@@ -56,5 +56,5 @@ test("movePath re-points tabs inside a moved folder only", () => {
   const a = pane([f("/w/src/a.ts"), f("/w/src/lib/b.ts"), f("/w/srcx/c.ts"), t("term")]);
   const root = rootWith(a);
   movePath(root, "/w/src", "/w/old/src");
-  expect(a.tabs.map((x) => (x.kind === "file" ? x.path : x.cwd))).toEqual(["/w/old/src/a.ts", "/w/old/src/lib/b.ts", "/w/srcx/c.ts", "/"]);
+  expect(a.tabs.map((x) => ("path" in x ? x.path : x.cwd))).toEqual(["/w/old/src/a.ts", "/w/old/src/lib/b.ts", "/w/srcx/c.ts", "/"]);
 });

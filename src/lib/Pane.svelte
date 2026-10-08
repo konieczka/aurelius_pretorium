@@ -1,15 +1,18 @@
 <script lang="ts">
-  import { Columns2, Eye, Pencil, Plus, Rows2, SquareTerminal, X } from "@lucide/svelte";
+  import { Columns2, Eye, GitCompare, Pencil, Plus, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
   import { app, closeTab, newTerminal, splitFocused } from "./state.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
+  import Diff from "./Diff.svelte";
 
   let { pane = $bindable() }: { pane: Pane } = $props();
   const tab = $derived(pane.tabs[pane.active]);
   const label = (t: Pane["tabs"][number]) =>
-    t.kind === "file" ? t.path.split("/").pop() : app.titles[t.id] || "Terminal";
+    t.kind === "file" ? t.path.split("/").pop() :
+    t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
+    app.titles[t.id] || "Terminal";
 
   function drop(ev: DragEvent, index: number) {
     const id = ev.dataTransfer?.getData("text/x-tab");
@@ -59,14 +62,14 @@
         class="tab"
         class:active={i === pane.active}
         draggable="true"
-        title={t.kind === "file" ? t.path : t.cwd}
+        title={t.kind === "term" ? t.cwd : t.path}
         onclick={() => (pane.active = i)}
         onauxclick={(e) => e.button === 1 && closeTab(t.id)}
         ondragstart={(e) => (e.dataTransfer?.setData("text/x-tab", t.id), (app.dragging = true))}
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
@@ -87,6 +90,8 @@
       {#key tab.id}
         {#if tab.kind === "term"}
           <Terminal tabId={tab.id} cwd={tab.cwd} />
+        {:else if tab.kind === "diff"}
+          <Diff path={tab.path} staged={tab.staged} orig={tab.orig} ref={tab.ref} />
         {:else}
           <Editor tabId={tab.id} path={tab.path} preview={!!tab.preview} />
         {/if}

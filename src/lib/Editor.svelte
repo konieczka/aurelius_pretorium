@@ -1,7 +1,9 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { EditorView, basicSetup } from "codemirror";
-  import { Compartment } from "@codemirror/state";
+  import { Compartment, Transaction } from "@codemirror/state";
+  import { keymap } from "@codemirror/view";
+  import { conflictMarkers, conflictsIn, goToConflict } from "./conflictView";
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
   import { languages } from "@codemirror/language-data";
   import { tags as t } from "@lezer/highlight";
@@ -29,13 +31,30 @@
     if (tab?.kind !== "file") return;
     await invoke("write_file", { path: tab.path, content: e.view.state.doc.toString() });
     app.dirty[tabId] = false;
+    app.gitVersion++;
   }
+
+  /** Pick up external changes (agents, git pull/checkout) when the tab has no unsaved edits. */
+  export async function reloadEditor(tabId: string, path: string) {
+    const e = entries.get(tabId);
+    if (!e?.view || app.dirty[tabId]) return;
+    const disk = await invoke<string>("read_file", { path }).catch(() => null);
+    const cur = e.view?.state.doc.toString();
+    if (disk === null || cur === undefined || disk === cur || app.dirty[tabId]) return;
+    e.view!.dispatch({ changes: { from: 0, to: cur.length, insert: disk }, annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] });
+  }
+
+  /** Conflict navigation for the toolbar; returns the 1-based index. */
+  export const jumpConflict = (tabId: string, dir: 1 | -1) => {
+    const v = entries.get(tabId)?.view;
+    return v ? (v.focus(), goToConflict(v, dir)) : 0;
+  };
 
   export const focusEditor = (tabId: string) => entries.get(tabId)?.view?.focus();
   const text = (tabId: string) => entries.get(tabId)?.view?.state.doc.toString() ?? "";
 
   // Aurelius theme in CSS variables only, so light/dark switching restyles editors live.
-  const aurelius = [
+  export const aurelius = [
     EditorView.theme({
       "&": { height: "100%", color: "var(--foreground)", backgroundColor: "var(--surface)" },
       ".cm-scroller": { fontFamily: "var(--font-mono)", fontSize: "13px", lineHeight: "1.55" },
@@ -71,6 +90,8 @@
     ),
   ];
 
+  export const languageFor = (path: string) => LanguageDescription.matchFilename(languages, path)?.load();
+
   function create(tabId: string, path: string): Entry {
     const e: Entry = { host: document.createElement("div") };
     e.host.className = "editor-host";
@@ -85,12 +106,20 @@
             basicSetup,
             aurelius,
             lang.of([]),
-            EditorView.updateListener.of((u) => u.docChanged && (app.dirty[tabId] = true)),
+            conflictMarkers,
+            keymap.of([
+              { key: "F7", run: (v) => goToConflict(v, 1) > 0 },
+              { key: "Shift-F7", run: (v) => goToConflict(v, -1) > 0 },
+            ]),
+            EditorView.updateListener.of((u) => {
+              if (!u.docChanged) return;
+              if (!u.transactions.some((t) => t.annotation(Transaction.remote))) app.dirty[tabId] = true;
+              app.conflicts[tabId] = conflictsIn(u.state).length;
+            }),
           ],
         });
-        LanguageDescription.matchFilename(languages, path)
-          ?.load()
-          .then((support) => e.view?.dispatch({ effects: lang.reconfigure(support) }));
+        languageFor(path)?.then((support) => e.view?.dispatch({ effects: lang.reconfigure(support) }));
+        app.conflicts[tabId] = conflictsIn(e.view.state).length;
         app.dirty[tabId] = false; // nudge reactivity so the preview renders once loaded
       },
       (err) => {
@@ -105,6 +134,8 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
+  import { Check, ChevronDown, ChevronUp } from "@lucide/svelte";
+  import { git, markResolved } from "./GitPanel.svelte";
   let { tabId, path, preview }: { tabId: string; path: string; preview: boolean } = $props();
   let el: HTMLDivElement;
 
@@ -115,11 +146,37 @@
     if (!preview) e.view?.focus();
   });
 
+  $effect(() => {
+    void app.gitVersion; // bumped when git status changes (pull, checkout, agents editing files)
+    reloadEditor(tabId, untrack(() => path));
+  });
+
+  // Conflict toolbar: shown while the file has markers, or is still unmerged in git.
+  const conflicts = $derived(app.conflicts[tabId] ?? 0);
+  const unmerged = $derived(!!git.status?.files.some((f) => f.kind === "conflict" && `${git.root}/${f.path}` === path));
+  let at = $state(0);
+  async function resolved() {
+    if (app.dirty[tabId]) await saveEditor(tabId);
+    markResolved(path);
+  }
+
   // Sanitizing is mandatory: preview HTML runs in a window that can call the pty commands.
   const html = $derived(preview && app.dirty[tabId] !== undefined ? DOMPurify.sanitize(marked.parse(text(tabId), { async: false })) : "");
 </script>
 
 <div class="editor" bind:this={el} class:hidden={preview}></div>
+{#if !preview && (conflicts || unmerged)}
+  <div class="conflictbar">
+    {#if conflicts}
+      <span class="count">{at && at <= conflicts ? `Conflict ${at} of ${conflicts}` : `${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"}`}</span>
+      <button class="icon-btn" onclick={() => (at = jumpConflict(tabId, -1))} title="Previous conflict (⇧F7)"><ChevronUp size={14} strokeWidth={1.5} /></button>
+      <button class="icon-btn" onclick={() => (at = jumpConflict(tabId, 1))} title="Next conflict (F7)"><ChevronDown size={14} strokeWidth={1.5} /></button>
+    {:else}
+      <span class="count">No conflicts left</span>
+      <button class="resolve" onclick={resolved} title="Save and stage (git add)"><Check size={13} strokeWidth={1.75} />Mark as Resolved</button>
+    {/if}
+  </div>
+{/if}
 {#if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="md" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
@@ -134,6 +191,40 @@
     inset: 0;
     overflow: auto;
     background: var(--surface);
+  }
+  .conflictbar {
+    position: absolute;
+    top: 8px;
+    right: 18px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 2px 2px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--popover);
+    box-shadow: var(--shadow-raised);
+  }
+  .count {
+    margin-right: 4px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .resolve {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
   }
   .hidden {
     display: none;
