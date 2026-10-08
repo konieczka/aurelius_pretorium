@@ -1,0 +1,52 @@
+import { expect, test } from "bun:test";
+import { closeTab, dockTab, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
+
+const t = (id: string): Tab => ({ id, kind: "term", cwd: "/" });
+
+test("split, move, close collapse back to one pane", () => {
+  const a = pane([t("a")]);
+  const root = rootWith(a);
+
+  const b = split(root, a.id, "row", t("b")); // [a | b]
+  expect(root.dir).toBe("row");
+  expect(panes(root).map((p) => p.id)).toEqual([a.id, b.id]);
+
+  const c = split(root, b.id, "col", t("c")); // [a | (b / c)]
+  expect(root.children[1].type).toBe("split");
+  expect(panes(root).length).toBe(3);
+
+  moveTab(root, "c", a.id, 0); // c joins a; empty pane c removed, nested split collapses
+  expect(panes(root).length).toBe(2);
+  expect(root.children.every((n) => n.type === "pane")).toBe(true);
+  expect(a.tabs.map((x) => x.id)).toEqual(["c", "a"]);
+  expect(a.active).toBe(0);
+
+  closeTab(root, "b"); // pane b gone
+  expect(panes(root)).toEqual([a]);
+  closeTab(root, "a");
+  closeTab(root, "c"); // last pane is kept, just empty
+  expect(panes(root).length).toBe(1);
+  expect(a.tabs.length).toBe(0);
+  void c;
+});
+
+test("reorder within a pane", () => {
+  const a = pane([t("1"), t("2"), t("3")]);
+  const root = rootWith(a);
+  moveTab(root, "1", a.id, 3);
+  expect(a.tabs.map((x) => x.id)).toEqual(["2", "3", "1"]);
+  expect(a.active).toBe(2);
+});
+
+test("dock a tab onto pane edges", () => {
+  const a = pane([t("1"), t("2")]);
+  const root = rootWith(a);
+  const b = dockTab(root, "2", a.id, "left")!; // [2 | 1]
+  expect(panes(root).map((p) => p.tabs[0].id)).toEqual(["2", "1"]);
+  dockTab(root, "2", a.id, "bottom"); // pane b emptied & removed: [1 / 2]
+  expect(root.dir).toBe("col"); // nested split lifted into root
+  expect(panes(root).map((p) => p.tabs[0].id)).toEqual(["1", "2"]);
+  expect(panes(root).some((p) => p.id === b.id)).toBe(false);
+  dockTab(root, "2", panes(root)[1].id, "right"); // lone tab onto itself: no-op
+  expect(panes(root).length).toBe(2);
+});
