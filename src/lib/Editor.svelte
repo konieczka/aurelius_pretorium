@@ -8,9 +8,10 @@
   import { marked } from "marked";
   import DOMPurify from "dompurify";
   import { app } from "./state.svelte";
+  import { findTab } from "./layout";
 
   // Editors outlive their component so unsaved edits survive tab moves.
-  type Entry = { view?: EditorView; host: HTMLDivElement; path: string; error?: string };
+  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string };
   const entries = new Map<string, Entry>();
 
   export function disposeEditor(tabId: string) {
@@ -22,7 +23,11 @@
   export async function saveEditor(tabId: string) {
     const e = entries.get(tabId);
     if (!e?.view) return;
-    await invoke("write_file", { path: e.path, content: e.view.state.doc.toString() });
+    // The tab's path, not e.path: the file may have been moved since it was opened.
+    const f = findTab(app.root, tabId);
+    const tab = f?.pane.tabs[f.index];
+    if (tab?.kind !== "file") return;
+    await invoke("write_file", { path: tab.path, content: e.view.state.doc.toString() });
     app.dirty[tabId] = false;
   }
 
@@ -67,7 +72,7 @@
   ];
 
   function create(tabId: string, path: string): Entry {
-    const e: Entry = { host: document.createElement("div"), path };
+    const e: Entry = { host: document.createElement("div") };
     e.host.className = "editor-host";
     entries.set(tabId, e);
     invoke<string>("read_file", { path }).then(
@@ -99,11 +104,13 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
   let { tabId, path, preview }: { tabId: string; path: string; preview: boolean } = $props();
   let el: HTMLDivElement;
 
   $effect(() => {
-    const e = entries.get(tabId) ?? create(tabId, path);
+    // untrack: a moved file changes `path`, which must not re-run this (and steal focus).
+    const e = entries.get(tabId) ?? create(tabId, untrack(() => path));
     el.appendChild(e.host);
     if (!preview) e.view?.focus();
   });

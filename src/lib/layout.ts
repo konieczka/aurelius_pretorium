@@ -102,3 +102,10 @@ export function dockTab(root: Split, tabId: string, paneId: string, side: Side) 
   if (!f.pane.tabs.length) removePane(root, f.pane.id);
   return fresh;
 }
+
+/** A file or folder moved from `from` to `to`: re-point file tabs at it or inside it. */
+export function movePath(root: Split, from: string, to: string) {
+  for (const p of panes(root))
+    for (const t of p.tabs)
+      if (t.kind === "file" && (t.path === from || t.path.startsWith(from + "/"))) t.path = to + t.path.slice(from.length);
+}

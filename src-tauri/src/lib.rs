@@ -4,7 +4,8 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::State;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, State};
 
 struct Session {
     writer: Box<dyn Write + Send>,
@@ -130,6 +131,81 @@ fn write_file(path: String, content: String) -> Res<()> {
     std::fs::write(path, content).map_err(err)
 }
 
+#[tauri::command]
+fn create_file(path: String) -> Res<()> {
+    // create_new: never clobber an existing file
+    std::fs::OpenOptions::new().write(true).create_new(true).open(path).map(|_| ()).map_err(err)
+}
+
+#[tauri::command]
+fn create_dir(path: String) -> Res<()> {
+    std::fs::create_dir(path).map_err(err)
+}
+
+#[tauri::command]
+fn move_path(from: String, to: String) -> Res<()> {
+    // fs::rename silently replaces an existing file on Unix.
+    // ponytail: exists-check then rename is racy; fine for a single-user editor.
+    if std::path::Path::new(&to).exists() {
+        return Err(format!("{to} already exists"));
+    }
+    std::fs::rename(from, to).map_err(err)
+}
+
+/// Move `path` into a fresh subfolder of `dir` (the undo holding area) and return where it went.
+fn hold(path: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let slot = dir.join(nanos.to_string());
+    std::fs::create_dir_all(&slot)?;
+    let target = slot.join(path.file_name().ok_or_else(|| std::io::Error::other("no file name"))?);
+    std::fs::rename(path, &target).inspect_err(|_| {
+        let _ = std::fs::remove_dir(&slot);
+    })?;
+    Ok(target)
+}
+
+fn to_system_trash(path: &Path) -> Result<(), trash::Error> {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        // Default method scripts Finder (automation permission prompt); NSFileManager doesn't.
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx.delete(path)
+}
+
+fn holding_dir(app: &AppHandle) -> Res<PathBuf> {
+    Ok(app.path().app_data_dir().map_err(err)?.join("trash"))
+}
+
+/// Recoverable delete. Returns the held path (undo = move_path back), or None when the item had to
+/// go straight to the system Trash (different volume than the holding area) and can't be undone here.
+#[tauri::command]
+fn trash_path(app: AppHandle, path: String) -> Res<Option<String>> {
+    match hold(Path::new(&path), &holding_dir(&app)?) {
+        Ok(p) => Ok(Some(p.to_string_lossy().into_owned())),
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            to_system_trash(Path::new(&path)).map_err(err)?;
+            Ok(None)
+        }
+        Err(e) => Err(err(e)),
+    }
+}
+
+/// Last session's undo history is gone, so its held items go to the system Trash (never deleted outright).
+fn flush_holding(app: &AppHandle) {
+    let Ok(dir) = holding_dir(app) else { return };
+    let Ok(slots) = std::fs::read_dir(&dir) else { return };
+    for slot in slots.flatten() {
+        let items: Vec<_> = std::fs::read_dir(slot.path()).into_iter().flatten().flatten().collect();
+        if items.iter().all(|i| to_system_trash(&i.path()).is_ok()) {
+            let _ = std::fs::remove_dir(slot.path());
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -148,10 +224,33 @@ pub fn run() {
                 &Submenu::with_items(h, "Window", true, &[&P::minimize(h, None)?, &P::fullscreen(h, None)?])?,
             ])
         })
+        .setup(|app| {
+            let h = app.handle().clone();
+            std::thread::spawn(move || flush_holding(&h));
+            Ok(())
+        })
         .manage(Ptys::default())
         .invoke_handler(tauri::generate_handler![
-            pty_spawn, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file
+            pty_spawn, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hold_moves_into_holding_and_back() {
+        let base = std::env::temp_dir().join(format!("fc-hold-{}", std::process::id()));
+        let src = base.join("ws/notes.md");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(&src, "hi").unwrap();
+        let held = super::hold(&src, &base.join("trash")).unwrap();
+        assert!(!src.exists());
+        assert_eq!(std::fs::read_to_string(&held).unwrap(), "hi");
+        assert_eq!(held.file_name().unwrap(), "notes.md");
+        std::fs::rename(&held, &src).unwrap(); // what undo does
+        assert!(src.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

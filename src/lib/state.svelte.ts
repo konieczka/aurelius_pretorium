@@ -1,4 +1,5 @@
-import { ask } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
 import { disposeTerm } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
@@ -11,6 +12,12 @@ export const app = $state({
   titles: {} as Record<string, string>, // tab id -> terminal title
   treeVersion: 0,
   dragging: false, // a tab is being dragged: panes show drop zones
+  expanded: {} as Record<string, boolean>, // folder path -> open in the tree
+  selectedDir: "", // where New File / New Folder go (last clicked folder, or the clicked file's folder)
+  creating: null as null | { dir: string; kind: "file" | "dir" }, // inline name input in the tree
+  dropDir: "", // folder highlighted while dragging a tree entry
+  selectedPath: "", // tree row ⌘⌫ deletes
+  treeFocused: false, // last interaction was in the sidebar: ⌘Z / ⌘⌫ go to the tree, not the editor/terminal
 });
 
 const store = {
@@ -44,6 +51,11 @@ export function openWorkspace(path: string) {
   app.root = root ?? L.rootWith(L.pane([term()]));
   app.focused = L.panes(app.root)[0].id;
   app.dirty = {};
+  app.expanded = {};
+  app.selectedDir = path;
+  app.creating = null;
+  app.selectedPath = "";
+  history = [];
 }
 
 export function newTerminal() {
@@ -86,4 +98,102 @@ function dispose(t: L.Tab) {
   else disposeEditor(t.id);
   delete app.dirty[t.id];
   delete app.titles[t.id];
+}
+
+const parent = (path: string) => path.slice(0, path.lastIndexOf("/"));
+const fail = (e: unknown) => message(String(e), { kind: "error" });
+
+export function startCreate(kind: "file" | "dir") {
+  const dir = app.selectedDir || app.workspace;
+  app.expanded[dir] = true;
+  app.creating = { dir, kind };
+}
+
+export async function finishCreate(name: string) {
+  const c = app.creating;
+  app.creating = null;
+  name = name.trim();
+  if (!c || !name) return;
+  if (name.includes("/") || name === "." || name === "..") return fail(`Invalid name: ${name}`);
+  const path = `${c.dir}/${name}`;
+  try {
+    await invoke(c.kind === "file" ? "create_file" : "create_dir", { path });
+  } catch (e) {
+    return fail(e);
+  }
+  record({ kind: "create", path });
+  app.treeVersion++;
+  app.selectedPath = path;
+  if (c.kind === "file") openFile(path);
+  else app.selectedDir = path;
+}
+
+// Undo history for tree operations (in memory, per workspace).
+type Op = { kind: "move"; from: string; to: string } | { kind: "create"; path: string } | { kind: "delete"; path: string; held: string };
+let history: Op[] = [];
+function record(op: Op) {
+  history.push(op);
+  if (history.length > 50) history.shift();
+}
+const under = (p: string, root: string) => p === root || p.startsWith(root + "/");
+
+async function doMove(from: string, to: string) {
+  try {
+    await invoke("move_path", { from, to });
+  } catch (e) {
+    fail(e);
+    return false;
+  }
+  L.movePath(app.root, from, to);
+  if (app.expanded[from]) app.expanded[to] = true;
+  if (under(app.selectedDir, from)) app.selectedDir = parent(to);
+  if (under(app.selectedPath, from)) app.selectedPath = to;
+  app.treeVersion++;
+  return true;
+}
+
+/** Move a file or folder into `dir` (drag and drop in the tree). */
+export async function moveInto(from: string, dir: string) {
+  // No-op onto its own folder; a folder can't go inside itself.
+  if (parent(from) === dir || under(dir, from)) return;
+  const to = `${dir}/${from.slice(from.lastIndexOf("/") + 1)}`;
+  if (await doMove(from, to)) record({ kind: "move", from, to });
+}
+
+/**
+ * Recoverable delete: the backend parks the item in a holding folder (undo moves it back).
+ * Closes tabs under `path` first, asking about unsaved ones.
+ * Returns the held path; "" if done but not undoable (went to system Trash, or failed); null if the user cancelled.
+ */
+async function softDelete(path: string): Promise<string | null> {
+  const tabsUnder = () => L.panes(app.root).flatMap((p) => p.tabs).filter((t) => t.kind === "file" && under(t.path, path));
+  for (const t of tabsUnder()) await closeTab(t.id);
+  if (tabsUnder().length) return null;
+  let held: string | null;
+  try {
+    held = await invoke<string | null>("trash_path", { path });
+  } catch (e) {
+    fail(e);
+    return "";
+  }
+  if (under(app.selectedDir, path)) app.selectedDir = parent(path);
+  if (under(app.selectedPath, path)) app.selectedPath = "";
+  app.treeVersion++;
+  if (held === null) message(`Moved to the Trash: ${path}\n(It's on another disk, so this can't be undone here.)`);
+  return held ?? "";
+}
+
+export async function deleteSelected() {
+  const path = app.selectedPath;
+  if (!path || path === app.workspace) return;
+  const held = await softDelete(path);
+  if (held) record({ kind: "delete", path, held });
+}
+
+export async function undoTree() {
+  const op = history.pop();
+  if (!op) return;
+  if (op.kind === "move") await doMove(op.to, op.from);
+  else if (op.kind === "delete") (await doMove(op.held, op.path)) && (app.selectedPath = op.path);
+  else if ((await softDelete(op.path)) === null) history.push(op); // kept unsaved changes: undo stays available
 }

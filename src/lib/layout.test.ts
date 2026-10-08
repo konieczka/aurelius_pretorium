@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { closeTab, dockTab, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
+import { closeTab, dockTab, movePath, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
 
 const t = (id: string): Tab => ({ id, kind: "term", cwd: "/" });
 
@@ -49,4 +49,12 @@ test("dock a tab onto pane edges", () => {
   expect(panes(root).some((p) => p.id === b.id)).toBe(false);
   dockTab(root, "2", panes(root)[1].id, "right"); // lone tab onto itself: no-op
   expect(panes(root).length).toBe(2);
+});
+
+test("movePath re-points tabs inside a moved folder only", () => {
+  const f = (path: string): Tab => ({ id: path, kind: "file", path });
+  const a = pane([f("/w/src/a.ts"), f("/w/src/lib/b.ts"), f("/w/srcx/c.ts"), t("term")]);
+  const root = rootWith(a);
+  movePath(root, "/w/src", "/w/old/src");
+  expect(a.tabs.map((x) => (x.kind === "file" ? x.path : x.cwd))).toEqual(["/w/old/src/a.ts", "/w/old/src/lib/b.ts", "/w/srcx/c.ts", "/"]);
 });

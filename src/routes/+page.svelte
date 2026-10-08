@@ -1,14 +1,14 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { FolderOpen, Monitor, Moon, RefreshCw, Sun } from "@lucide/svelte";
+  import { FilePlus, FolderOpen, FolderPlus, Monitor, Moon, RefreshCw, Sun } from "@lucide/svelte";
   import { cycleTheme, theme } from "$lib/theme.svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import FileTree from "$lib/FileTree.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import {
-    app, activeTab, closeTab, lastWorkspace, newTerminal, openWorkspace, saveLayout, splitFocused,
+    app, activeTab, closeTab, deleteSelected, lastWorkspace, moveInto, undoTree, newTerminal, openWorkspace, saveLayout, splitFocused, startCreate,
   } from "$lib/state.svelte";
 
   const last = lastWorkspace();
@@ -23,9 +23,17 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    const k = e.key.toLowerCase();
+    // Typing into a pane hands ⌘Z back to it. Programmatic focus (a tab mounting) deliberately doesn't.
+    if (!e.metaKey && !e.ctrlKey && (e.target as Element).closest?.("main")) app.treeFocused = false;
+    // Tree undo/delete only when the sidebar has focus; otherwise ⌘Z belongs to the editor/terminal.
+    if (app.treeFocused && !app.creating && (e.metaKey || e.ctrlKey) && !e.shiftKey && (k === "z" || k === "backspace")) {
+      e.preventDefault();
+      e.stopPropagation();
+      return k === "z" ? undoTree() : deleteSelected();
+    }
     if (!e.metaKey) return;
     const t = activeTab();
-    const k = e.key.toLowerCase();
     const act =
       k === "=" || k === "+" ? () => zoom(0.1) :
       k === "-" ? () => zoom(-0.1) :
@@ -55,19 +63,38 @@
 
 {#if app.workspace}
   <div class="app">
-    <aside>
+    <aside onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <span class="mark"></span>
         <span class="ws" title={app.workspace}>{app.workspace.split("/").pop()}</span>
+        <button class="icon-btn" onclick={() => startCreate("file")} title="New file"><FilePlus size={14} strokeWidth={1.5} /></button>
+        <button class="icon-btn" onclick={() => startCreate("dir")} title="New folder"><FolderPlus size={14} strokeWidth={1.5} /></button>
         <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
         <button class="icon-btn" onclick={pickFolder} title="Open folder (⌘O)"><FolderOpen size={15} strokeWidth={1.5} /></button>
         {@render themeToggle()}
       </header>
-      <div class="tree">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="tree"
+        class:drop={app.dropDir === app.workspace}
+        onclick={(e) => e.target === e.currentTarget && (app.selectedDir = app.workspace)}
+        onkeydown={() => {}}
+        ondragover={(e) => {
+          if (!e.dataTransfer?.types.includes("text/x-path")) return;
+          e.preventDefault();
+          app.dropDir = app.workspace;
+        }}
+        ondragleave={(e) => e.target === e.currentTarget && (app.dropDir = "")}
+        ondrop={(e) => {
+          const from = e.dataTransfer?.getData("text/x-path");
+          app.dropDir = "";
+          if (from) moveInto(from, app.workspace);
+        }}
+      >
         {#key app.workspace}<FileTree path={app.workspace} />{/key}
       </div>
     </aside>
-    <main><Node bind:node={app.root} /></main>
+    <main onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
   </div>
 {:else}
   <div class="welcome">
@@ -114,6 +141,10 @@
     flex: 1;
     overflow: auto;
     padding: 6px 6px 12px;
+  }
+  .tree.drop {
+    background: var(--gold-soft);
+    box-shadow: inset 0 0 0 1px var(--gold-ring);
   }
   main {
     position: relative;
