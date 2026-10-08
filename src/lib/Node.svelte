@@ -67,17 +67,29 @@
   }
   .divider {
     flex: none;
-    background: #181a1f;
+    background: var(--border);
+    transition: background-color var(--dur-quick) var(--ease-standard);
   }
   .row > .divider {
-    width: 4px;
+    width: 1px;
     cursor: col-resize;
   }
   .col > .divider {
-    height: 4px;
+    height: 1px;
     cursor: row-resize;
   }
-  .divider:hover {
-    background: #3d4a63;
+  /* 1px line with a wider invisible grab area */
+  .divider {
+    position: relative;
+    z-index: 5;
+  }
+  .divider::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+  }
+  .divider:hover,
+  .divider:active {
+    background: var(--gold);
   }
 </style>

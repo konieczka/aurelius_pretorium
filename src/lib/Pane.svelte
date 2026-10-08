@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Columns2, Eye, Pencil, Plus, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
   import { app, closeTab, newTerminal, splitFocused } from "./state.svelte";
@@ -65,18 +66,21 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
+        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
-        {#if app.dirty[t.id]}<span class="dot">●</span>{/if}
-        <button class="x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab">×</button>
+        {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
+        <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
       </div>
     {/each}
     <span class="spacer"></span>
     {#if tab?.kind === "file" && tab.path.endsWith(".md")}
-      <button onclick={() => (tab.preview = !tab.preview)} title="Toggle preview (⌘E)">{tab.preview ? "Edit" : "Preview"}</button>
+      <button class="icon-btn" onclick={() => (tab.preview = !tab.preview)} title={tab.preview ? "Edit (⌘E)" : "Preview (⌘E)"}>
+        {#if tab.preview}<Pencil size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
+      </button>
     {/if}
-    <button onclick={here(newTerminal)} title="New terminal (⌘T)">+</button>
-    <button onclick={here(() => splitFocused("row"))} title="Split right (⌘D)">◫</button>
-    <button onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)">⊟</button>
+    <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><Plus size={15} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)"><Rows2 size={14} strokeWidth={1.5} /></button>
   </div>
   <div class="body">
     {#if tab}
@@ -88,7 +92,7 @@
         {/if}
       {/key}
     {:else}
-      <div class="empty">⌘T new terminal · ⌘O open folder</div>
+      <div class="empty"><span><kbd>⌘T</kbd> new terminal</span><span><kbd>⌘O</kbd> open folder</span></div>
     {/if}
     {#if app.dragging}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -101,44 +105,64 @@
 
 <style>
   .pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
     height: 100%;
     min-width: 0;
     min-height: 0;
-    outline: 1px solid transparent;
-    outline-offset: -1px;
-  }
-  .pane.focused {
-    outline-color: #3d4a63;
   }
   .bar {
     display: flex;
     align-items: stretch;
-    height: 30px;
+    gap: 2px;
+    height: 34px;
     flex: none;
-    background: #21252b;
+    padding: 0 4px 0 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
     overflow-x: auto;
     scrollbar-width: none;
   }
   .tab {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 6px 0 12px;
-    color: #9da5b4;
-    font-size: 12px;
+    padding: 0 4px 0 12px;
+    color: var(--muted-foreground);
+    font-size: 12.5px;
     cursor: pointer;
     white-space: nowrap;
-    border-right: 1px solid #181a1f;
+    transition: color var(--dur-quick) var(--ease-standard), background-color var(--dur-quick) var(--ease-standard);
+  }
+  .tab:hover {
+    color: var(--foreground);
   }
   .tab.active {
-    background: #282c34;
-    color: #e6e6e6;
+    background: var(--surface);
+    color: var(--foreground);
+    box-shadow: inset 1px 0 0 var(--border), inset -1px 0 0 var(--border);
   }
-  .focused .tab.active {
-    box-shadow: inset 0 2px 0 #61afef;
+  .tab.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--surface);
+  }
+  /* Gold = focus: only the focused pane's active tab gets the bar */
+  .focused .tab.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: var(--gold);
   }
   .name {
     max-width: 200px;
@@ -146,25 +170,20 @@
     text-overflow: ellipsis;
   }
   .dot {
-    font-size: 9px;
-    color: #e5c07b;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--gold);
   }
   .spacer {
     flex: 1;
   }
-  button {
-    background: none;
-    border: 0;
-    color: #9da5b4;
-    font-size: 13px;
-    padding: 0 8px;
-    cursor: pointer;
-  }
-  button:hover {
-    color: #fff;
+  .bar > .icon-btn {
+    align-self: center;
   }
   .x {
-    padding: 0 4px;
+    width: 20px;
+    height: 20px;
     visibility: hidden;
   }
   .tab:hover .x,
@@ -183,21 +202,38 @@
   }
   .zone {
     position: absolute;
-    inset: 0;
-    background: rgba(97, 175, 239, 0.18);
-    border: 2px solid rgba(97, 175, 239, 0.6);
+    inset: 6px;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-ring);
+    border-radius: var(--radius-md);
     pointer-events: none;
-    transition: all 80ms;
+    transition: all var(--dur-quick) var(--ease-out-quint);
   }
   .zone.left { right: 50%; }
   .zone.right { left: 50%; }
   .zone.top { bottom: 50%; }
   .zone.bottom { top: 50%; }
   .empty {
-    display: grid;
-    place-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     height: 100%;
-    color: #5c6370;
+    background: var(--surface);
+    color: var(--muted-foreground);
     font-size: 13px;
+  }
+  kbd {
+    display: inline-block;
+    min-width: 28px;
+    margin-right: 8px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--muted);
+    font-family: inherit;
+    font-size: 11px;
+    text-align: center;
   }
 </style>

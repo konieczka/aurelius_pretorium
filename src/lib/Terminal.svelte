@@ -5,6 +5,21 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import "@xterm/xterm/css/xterm.css";
   import { app } from "./state.svelte";
+  import { theme } from "./theme.svelte";
+
+  // xterm takes hex only: Aurelius tokens converted from oklch (bg = --surface, cursor = --gold).
+  const palettes = {
+    light: {
+      background: "#fff9ee", foreground: "#14110d", cursor: "#966a00", cursorAccent: "#fff9ee", selectionBackground: "#ba890040",
+      black: "#14110d", red: "#a03f3c", green: "#27762f", yellow: "#855b00", blue: "#1666aa", magenta: "#6f4fa1", cyan: "#007780", white: "#bdb6ad",
+      brightBlack: "#68625a", brightRed: "#862726", brightGreen: "#045e17", brightYellow: "#6d4400", brightBlue: "#004e90", brightMagenta: "#593888", brightCyan: "#006069", brightWhite: "#e2ddd5",
+    },
+    dark: {
+      background: "#110d07", foreground: "#f2eee7", cursor: "#e6b642", cursorAccent: "#110d07", selectionBackground: "#e6b64240",
+      black: "#322d26", red: "#ed8c84", green: "#78bf7b", yellow: "#cda448", blue: "#6db0f4", magenta: "#b699eb", cyan: "#24c1c9", white: "#d1cdc7",
+      brightBlack: "#75716a", brightRed: "#ffa59d", brightGreen: "#91d993", brightYellow: "#e8be62", brightBlue: "#86caff", brightMagenta: "#d0b2ff", brightCyan: "#4cdbe3", brightWhite: "#f8f5ef",
+    },
+  };
 
   // Terminals outlive their component so moving a tab or re-splitting never kills the shell.
   type Entry = { term: Terminal; fit: FitAddon; host: HTMLDivElement; pty?: number };
@@ -26,12 +41,13 @@
     host.className = "term-host";
     container.appendChild(host);
     const term = new Terminal({
-      fontFamily: "Menlo, Monaco, monospace",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
+      lineHeight: 1.15,
+      theme: palettes[theme.dark ? "dark" : "light"],
       cursorBlink: true,
       allowProposedApi: true,
       macOptionIsMeta: true,
-      theme: { background: "#282c34", foreground: "#d7dae0" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -75,6 +91,11 @@
     ro.observe(el);
     return () => ro.disconnect();
   });
+
+  $effect(() => {
+    const e = entries.get(tabId);
+    if (e) e.term.options.theme = palettes[theme.dark ? "dark" : "light"];
+  });
 </script>
 
 <div class="term" bind:this={el}></div>
@@ -83,8 +104,8 @@
   .term {
     position: absolute;
     inset: 0;
-    padding: 4px 0 0 8px;
-    background: #282c34;
+    padding: 6px 0 0 10px;
+    background: var(--surface);
   }
   .term :global(.term-host) {
     width: 100%;

@@ -1,0 +1,179 @@
+/* Aurelius design tokens, copied from aurelius_chat/src/styles/globals.css. Keep in sync by hand. */
+@import "@fontsource-variable/geist";
+@import "@fontsource/cinzel/600.css";
+
+:root {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-cinzel: "Cinzel", serif;
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-instant: 90ms;
+  --dur-quick: 140ms;
+  --dur-base: 220ms;
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+
+  color-scheme: light;
+  --background: oklch(0.99 0.015 80 / 90%);
+  /* Opaque content surface (terminal, editor); = --background over the field. xterm palette in Terminal.svelte matches. */
+  --surface: oklch(0.985 0.016 80);
+  --foreground: oklch(0.18 0.01 75);
+  --card: oklch(0.995 0.012 82 / 85%);
+  --popover: oklch(0.995 0.012 82 / 95%);
+  --primary: oklch(0.25 0.02 75);
+  --primary-foreground: oklch(0.98 0.01 80);
+  --secondary: oklch(0.96 0.018 78 / 85%);
+  --muted: oklch(0.96 0.018 78 / 80%);
+  --muted-foreground: oklch(0.5 0.015 75);
+  --accent: oklch(0.96 0.022 80 / 85%);
+  --accent-foreground: oklch(0.25 0.02 75);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.8 0.025 76 / 72%);
+  --border-strong: oklch(0.68 0.032 74 / 85%);
+  --input: oklch(0.9 0.015 80 / 70%);
+  --sidebar: oklch(0.97 0.02 82 / 88%);
+  --sidebar-foreground: oklch(0.18 0.01 75);
+  --sidebar-accent: oklch(0.94 0.022 78 / 85%);
+  --sidebar-border: oklch(0.88 0.02 78 / 50%);
+  --gradient-from: oklch(0.955 0.022 85);
+  --gradient-to: oklch(0.912 0.03 72);
+  --scrollbar-thumb: oklch(0.78 0.02 78 / 50%);
+  --scrollbar-thumb-hover: oklch(0.65 0.025 78 / 70%);
+  /* Gold marks exactly four things: focus, selection, the active tool, and a response being written. */
+  --gold: oklch(0.66 0.145 85);
+  --gold-ring: oklch(0.555 0.12 82);
+  --gold-soft: oklch(0.66 0.145 85 / 16%);
+  --shadow-tint: 0.28 0.03 70;
+  --shadow-raised: 0 1px 2px oklch(var(--shadow-tint) / 0.05), 0 2px 6px -1px oklch(var(--shadow-tint) / 0.07);
+  --mark-gradient: linear-gradient(135deg, oklch(0.45 0.035 75) 0%, oklch(0.4 0.04 78) 50%, oklch(0.35 0.045 80) 100%);
+  --wordmark-gradient: linear-gradient(135deg, oklch(0.4 0.04 78) 0%, oklch(0.35 0.045 80) 100%);
+  /* Low-chroma syntax palette (Aurelius hljs colors) */
+  --syn-comment: oklch(0.58 0.015 78);
+  --syn-keyword: oklch(0.44 0.11 300);
+  --syn-string: oklch(0.46 0.1 145);
+  --syn-number: oklch(0.5 0.11 45);
+  --syn-title: oklch(0.45 0.11 250);
+  --syn-attr: oklch(0.48 0.09 200);
+  --syn-deletion: oklch(0.5 0.14 25);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.16 0.012 78 / 90%);
+  --surface: oklch(0.16 0.014 77);
+  --foreground: oklch(0.95 0.01 80);
+  --card: oklch(0.22 0.015 76 / 85%);
+  --popover: oklch(0.22 0.015 76 / 95%);
+  --primary: oklch(0.9 0.015 82);
+  --primary-foreground: oklch(0.22 0.015 76);
+  --secondary: oklch(0.28 0.015 75 / 85%);
+  --muted: oklch(0.28 0.015 75 / 80%);
+  --muted-foreground: oklch(0.68 0.01 78);
+  --accent: oklch(0.3 0.018 78 / 85%);
+  --accent-foreground: oklch(0.95 0.01 80);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.95 0.01 80 / 15%);
+  --border-strong: oklch(0.95 0.01 80 / 24%);
+  --input: oklch(0.95 0.01 80 / 18%);
+  --sidebar: oklch(0.22 0.015 76 / 88%);
+  --sidebar-foreground: oklch(0.95 0.01 80);
+  --sidebar-accent: oklch(0.3 0.018 78 / 85%);
+  --sidebar-border: oklch(0.95 0.01 80 / 12%);
+  --gradient-from: oklch(0.205 0.025 85);
+  --gradient-to: oklch(0.085 0.035 60);
+  --scrollbar-thumb: oklch(0.45 0.015 78 / 45%);
+  --scrollbar-thumb-hover: oklch(0.55 0.02 78 / 65%);
+  --gold: oklch(0.8 0.14 86);
+  --gold-ring: oklch(0.815 0.135 86);
+  --gold-soft: oklch(0.8 0.14 86 / 20%);
+  --shadow-tint: 0.06 0.02 70;
+  --shadow-raised: inset 0 1px 0 oklch(0.95 0.01 80 / 0.05), 0 2px 6px -1px oklch(var(--shadow-tint) / 0.4);
+  --mark-gradient: linear-gradient(135deg, oklch(0.82 0.03 78) 0%, oklch(0.78 0.035 80) 50%, oklch(0.74 0.04 82) 100%);
+  --wordmark-gradient: linear-gradient(135deg, oklch(0.78 0.035 80) 0%, oklch(0.74 0.04 82) 100%);
+  --syn-comment: oklch(0.62 0.015 78);
+  --syn-keyword: oklch(0.78 0.11 300);
+  --syn-string: oklch(0.79 0.12 145);
+  --syn-number: oklch(0.8 0.11 55);
+  --syn-title: oklch(0.78 0.1 250);
+  --syn-attr: oklch(0.8 0.09 200);
+  --syn-deletion: oklch(0.75 0.14 25);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--gradient-from) 0%, var(--gradient-to) 100%);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+/* Paper texture over the gradient field */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("/noise-texture.png");
+  opacity: 0.035;
+  mix-blend-mode: multiply;
+}
+.dark body::before {
+  opacity: 0.03;
+  mix-blend-mode: soft-light;
+  filter: invert(1);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); border: 2px solid transparent; background-clip: padding-box; }
+
+button { font-family: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--gold-ring); outline-offset: 1px; }
+
+/* Ghost icon button (Aurelius Button variant="ghost" size="icon") */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease-standard), background-color var(--dur-quick) var(--ease-standard), transform var(--dur-quick) var(--ease-standard);
+}
+.icon-btn:hover { background: var(--accent); color: var(--accent-foreground); }
+.icon-btn:active { transform: scale(0.96); }
+
+/* Laurel mark: SVG as a mask over the brand gradient */
+.mark {
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  background: var(--mark-gradient);
+  mask: url("/aurelius-mark.svg") center / contain no-repeat;
+  -webkit-mask: url("/aurelius-mark.svg") center / contain no-repeat;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
