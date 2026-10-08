@@ -2,7 +2,7 @@
   import { Columns2, Eye, GitCompare, Pencil, Plus, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { app, closeTab, newTerminal, splitFocused } from "./state.svelte";
+  import { app, closeTab, foreignOwner, newTerminal, splitFocused } from "./state.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
@@ -13,6 +13,11 @@
     t.kind === "file" ? t.path.split("/").pop() :
     t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
     app.titles[t.id] || "Terminal";
+  /** "folder · branch" for tabs that belong to another folder than the one in the sidebar. */
+  const hint = (t: Pane["tabs"][number]) => {
+    const o = foreignOwner(t);
+    return o && [o.slice(o.lastIndexOf("/") + 1), app.branches[o]].filter(Boolean).join(" · ");
+  };
 
   function drop(ev: DragEvent, index: number) {
     const id = ev.dataTransfer?.getData("text/x-tab");
@@ -62,7 +67,7 @@
         class="tab"
         class:active={i === pane.active}
         draggable="true"
-        title={t.kind === "term" ? t.cwd : t.path}
+        title={(t.kind === "term" ? t.cwd : t.path) + (app.branches[foreignOwner(t)] ? ` (${app.branches[foreignOwner(t)]})` : "")}
         onclick={() => (pane.active = i)}
         onauxclick={(e) => e.button === 1 && closeTab(t.id)}
         ondragstart={(e) => (e.dataTransfer?.setData("text/x-tab", t.id), (app.dragging = true))}
@@ -71,6 +76,7 @@
       >
         {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
+        {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
       </div>
@@ -173,6 +179,13 @@
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .hint {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    color: var(--muted-foreground);
   }
   .dot {
     width: 6px;

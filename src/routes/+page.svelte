@@ -5,7 +5,7 @@
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
-  import QuickPick from "$lib/QuickPick.svelte";
+  import QuickPick, { pick } from "$lib/QuickPick.svelte";
   import FileTree from "$lib/FileTree.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
@@ -26,6 +26,16 @@
     if (typeof dir === "string") openWorkspace(dir);
   }
 
+  /** Switch the sidebar to another folder/project; open tabs stay. */
+  async function switchFolder() {
+    const v = await pick("Open a folder or project", [
+      { label: "Open folder…", hint: "⌘O", value: "\0open" },
+      ...app.recent.map((r) => ({ label: r.slice(r.lastIndexOf("/") + 1), detail: r, value: r })),
+    ]);
+    if (v === "\0open") pickFolder();
+    else if (v) openWorkspace(v);
+  }
+
   function onKey(e: KeyboardEvent) {
     const k = e.key.toLowerCase();
     // Typing into a pane hands ⌘Z back to it. Programmatic focus (a tab mounting) deliberately doesn't.
@@ -43,6 +53,7 @@
       k === "-" ? () => zoom(-0.1) :
       k === "0" ? () => zoom(null) :
       k === "o" ? pickFolder :
+      k === "p" ? switchFolder :
       !app.workspace ? null :
       k === "e" && e.shiftKey ? () => (app.sidebar = "files") :
       k === "g" && e.shiftKey ? () => (app.sidebar = "git") :
@@ -67,7 +78,7 @@
     <aside onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <span class="mark"></span>
-        <span class="ws" title={app.workspace}>{app.workspace.split("/").pop()}</span>
+        <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">{app.workspace.split("/").pop()}</button>
         <button class="icon-btn" onclick={pickFolder} title="Open folder (⌘O)"><FolderOpen size={15} strokeWidth={1.5} /></button>
       </header>
       <div class="toolbar">
@@ -202,6 +213,12 @@
   }
   .ws {
     flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    cursor: pointer;
     margin-left: 8px;
     overflow: hidden;
     text-overflow: ellipsis;

@@ -4,9 +4,22 @@ import * as L from "./layout";
 import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
 
+const store = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} },
+};
+
+function load<T>(key: string, fallback: T): T {
+  try { return JSON.parse(store.get(key) ?? "null") ?? fallback; } catch { return fallback; }
+}
+
+// One layout for the whole window: tabs from any folder/project stay open while the sidebar switches between them.
+// ("layout:<path>" is the old per-folder key, read once to migrate.)
 export const app = $state({
-  workspace: "",
-  root: L.rootWith(L.pane()),
+  workspace: "", // folder shown in the sidebar; new terminals start here
+  root: load<L.Split>("layout", load("layout:" + store.get("workspace"), L.rootWith(L.pane()))),
+  recent: load<string[]>("recent", []), // opened folders, most recent first
+  branches: {} as Record<string, string>, // folder -> current branch, for tabs outside the workspace
   focused: "", // pane id
   dirty: {} as Record<string, boolean>, // tab id -> unsaved
   titles: {} as Record<string, string>, // tab id -> terminal title
@@ -23,14 +36,17 @@ export const app = $state({
   treeFocused: false, // last interaction was in the sidebar: ⌘Z / ⌘⌫ go to the tree, not the editor/terminal
 });
 
-const store = {
-  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} },
-};
-
 export const lastWorkspace = () => store.get("workspace");
-export function saveLayout() {
-  if (app.workspace) store.set("layout:" + app.workspace, JSON.stringify(app.root));
+export const saveLayout = () => store.set("layout", JSON.stringify(app.root));
+
+const under = (p: string, root: string) => p === root || p.startsWith(root + "/");
+/** The opened folder a path belongs to (deepest match), or its parent dir if none. */
+export const ownerOf = (path: string) =>
+  app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? path.slice(0, path.lastIndexOf("/"));
+/** Folder a tab belongs to, or "" when it's in the current workspace. */
+export function foreignOwner(t: L.Tab) {
+  const p = t.kind === "term" ? t.cwd : t.path;
+  return !p || under(p, app.workspace) ? "" : ownerOf(p);
 }
 
 export function focusedPane(): L.Pane {
@@ -45,20 +61,17 @@ export function activeTab(): L.Tab | undefined {
 
 const term = (): L.Tab => ({ id: L.uid(), kind: "term", cwd: app.workspace });
 
+/** Show `path` in the sidebar. Open tabs are untouched. */
 export function openWorkspace(path: string) {
-  for (const p of L.panes(app.root)) for (const t of p.tabs) dispose(t);
   app.workspace = path;
   store.set("workspace", path);
-  let root: L.Split | null = null;
-  try { root = JSON.parse(store.get("layout:" + path) ?? "null"); } catch {}
-  app.root = root ?? L.rootWith(L.pane([term()]));
-  app.focused = L.panes(app.root)[0].id;
-  app.dirty = {};
-  app.expanded = {};
+  app.recent = [path, ...app.recent.filter((r) => r !== path)].slice(0, 15);
+  store.set("recent", JSON.stringify(app.recent));
   app.selectedDir = path;
   app.creating = null;
   app.selectedPath = "";
-  history = [];
+  if (!L.panes(app.root).some((p) => p.tabs.length)) app.root = L.rootWith(L.pane([term()]));
+  if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
 }
 
 export function newTerminal() {
@@ -158,8 +171,6 @@ function record(op: Op) {
   history.push(op);
   if (history.length > 50) history.shift();
 }
-const under = (p: string, root: string) => p === root || p.startsWith(root + "/");
-
 async function doMove(from: string, to: string) {
   try {
     await invoke("move_path", { from, to });

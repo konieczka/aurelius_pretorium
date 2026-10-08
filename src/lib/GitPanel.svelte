@@ -1,8 +1,8 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { ask, message } from "@tauri-apps/plugin-dialog";
+  import { app, foreignOwner, openDiff, openFile, openWorkspace, runInTerminal } from "./state.svelte";
   import * as L from "./layout";
-  import { app, openDiff, openFile, openWorkspace, runInTerminal } from "./state.svelte";
   import { pick, prompt } from "./QuickPick.svelte";
   import { changes, conflicts, parseStatus, staged, type GitFile, type GitStatus } from "./gitStatus";
 
@@ -46,6 +46,14 @@
       git.status = null;
     }
     git.loaded = true;
+    refreshBranches();
+  }
+
+  /** Branch of each other folder that has open tabs (tab hints); agents may switch them at any time. */
+  async function refreshBranches() {
+    const owners = new Set(L.panes(app.root).flatMap((p) => p.tabs).map(foreignOwner).filter(Boolean));
+    for (const o of owners)
+      app.branches[o] = await invoke<string>("git", { cwd: o, args: ["branch", "--show-current"] }).then((b) => b.trim(), () => "");
   }
 
   /** Merge / rebase / cherry-pick in progress? Read from the (per-worktree) git dir; missing files = not in progress. */
@@ -200,10 +208,8 @@
     await op(locals.has(local) ? ["switch", local] : ["switch", "-c", local, "--track", r.name]);
   }
 
-  /** Each worktree is its own workspace (own layout). Switching closes the current tabs, so ask if terminals are open. */
-  async function goTo(path: string) {
-    const terms = L.panes(app.root).flatMap((p) => p.tabs).filter((t) => t.kind === "term").length;
-    if (terms && !(await ask(`Open ${path}?\n${terms} terminal(s) in this workspace will be closed.`, { kind: "warning" }))) return;
+  /** Each worktree is its own workspace (own layout); the one we leave keeps running in the background. */
+  function goTo(path: string) {
     git.loaded = false;
     openWorkspace(path);
   }
