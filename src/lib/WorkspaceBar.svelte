@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Flame, Gauge, Monitor, Moon, PanelLeft, Plus, Sun, X } from "@lucide/svelte";
+  import { Flame, Gauge, Monitor, Moon, PanelLeft, Plus, Sparkles, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
+  import { skills, toggleSkills } from "./skillsView.svelte";
   import { app, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -137,7 +138,17 @@
   {#if ws.incoming}<div class="ws ghost"><span class="name">{nameOf(ws.incoming)}</span></div>{/if}
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
   <button
-    class="icon-btn usage"
+    class="icon-btn view skills"
+    class:on={skills.open}
+    onclick={toggleSkills}
+    title="Skills (⇧⌘K)"
+    aria-label="Skills"
+    aria-pressed={skills.open}
+  >
+    <Sparkles size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view"
     class:on={usage.open}
     onclick={toggleUsage}
     title="Usage (⇧⌘U)"
@@ -198,10 +209,10 @@
   .bar > .mark {
     margin: 0 6px 0 4px;
   }
-  .usage {
+  .skills {
     margin-left: auto;
   }
-  .usage.on {
+  .view.on {
     background: var(--sidebar-accent);
     color: var(--sidebar-foreground);
   }

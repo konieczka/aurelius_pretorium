@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Limit, Provider, Row } from "./usageStats";
+import { closeSkills } from "./skillsView.svelte";
 
 // The Usage view stands in for this window's panes while open (they stay mounted underneath). Per window, not saved.
 export const usage = $state({
@@ -14,7 +15,10 @@ export const usage = $state({
   now: Date.now(),
 });
 
-export const toggleUsage = () => (usage.open = !usage.open);
+export function toggleUsage() {
+  usage.open = !usage.open;
+  if (usage.open) closeSkills();
+}
 export const closeUsage = () => (usage.open = false);
 
 export async function loadStats() {
