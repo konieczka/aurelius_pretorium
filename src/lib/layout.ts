@@ -2,8 +2,8 @@
 // Ops mutate in place (works on plain objects and on Svelte $state proxies).
 
 export type Tab =
-  // agent: coding agent CLI running in it when last looked (see agents.svelte.ts)
-  | { id: string; kind: "term"; cwd: string; agent?: string }
+  // agent: coding agent CLI running in it when last looked (see agents.svelte.ts); name: set by the user (Rename)
+  | { id: string; kind: "term"; cwd: string; agent?: string; name?: string }
   | { id: string; kind: "file"; path: string; preview?: boolean }
   // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree)
   | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string };
@@ -125,4 +125,54 @@ export function equalize(n: LNode) {
   if (n.type === "pane") return;
   n.sizes = n.children.map((c) => span(c, n.dir));
   n.children.forEach(equalize);
+}
+
+/** Put `tab` in a new pane along the root's `side` edge, next to everything else. */
+function dockRoot(root: Split, tab: Tab, side: Side): Pane {
+  const dir = side === "left" || side === "right" ? "row" : "col";
+  const before = side === "left" || side === "top";
+  const fresh = pane([tab]);
+  if (root.children.length > 1 && root.dir !== dir) {
+    const rest: Split = { id: uid(), type: "split", dir: root.dir, children: root.children, sizes: root.sizes };
+    Object.assign(root, { dir, children: [rest], sizes: [1] });
+  }
+  root.dir = dir;
+  const n = root.children.length;
+  root.children.splice(before ? 0 : n, 0, fresh);
+  root.sizes.splice(before ? 0 : n, 0, root.sizes.reduce((a, b) => a + b, 0) / n);
+  return fresh;
+}
+
+/** A minimized tab and where it was: its pane and slot, and the node beside the pane in case the pane goes away
+ * (`side` = which side of that node the pane was on). */
+export type Minimized = { tab: Tab; pane: string; index: number; near?: { node: string; side: Side } };
+
+/** Take a tab out of the layout, remembering where it was. */
+export function minimize(root: Split, tabId: string): Minimized | null {
+  const f = findTab(root, tabId);
+  if (!f) return null;
+  const parent = parentOf(root, f.pane.id)!;
+  const i = parent.children.findIndex((c) => c.id === f.pane.id);
+  const row = parent.dir === "row";
+  const next = parent.children[i + 1], prev = parent.children[i - 1];
+  const near = next ? { node: next.id, side: (row ? "left" : "top") as Side }
+    : prev ? { node: prev.id, side: (row ? "right" : "bottom") as Side } : undefined;
+  const tab = f.pane.tabs[f.index];
+  closeTab(root, tabId);
+  return { tab, pane: f.pane.id, index: f.index, near };
+}
+
+/** Put a minimized tab back: in its pane if that's still there, else a new pane where that one was. Returns its pane. */
+export function restore(root: Split, m: Minimized): Pane {
+  const all = panes(root);
+  const at = all.find((p) => p.id === m.pane) ?? (all.length === 1 && !all[0].tabs.length ? all[0] : null);
+  if (at) {
+    at.tabs.splice(Math.min(m.index, at.tabs.length), 0, m.tab);
+    at.active = at.tabs.indexOf(m.tab);
+    return at;
+  }
+  const side = m.near?.side ?? "right";
+  // The neighbour was hoisted into the root when the pane went (so it was the whole rest): dock on the root's edge
+  if (!m.near || !parentOf(root, m.near.node)) return dockRoot(root, m.tab, side);
+  return split(root, m.near.node, side === "left" || side === "right" ? "row" : "col", m.tab, side === "left" || side === "top");
 }

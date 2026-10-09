@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { ask, message } from "@tauri-apps/plugin-dialog";
-  import { app, foreignOwner, openDiff, openFile, openWorkspace, runInTerminal } from "./state.svelte";
+  import { app, openDiff, openFile, openWorkspace, refreshRepo, runInTerminal, tabOwner } from "./state.svelte";
   import * as L from "./layout";
   import { pick, prompt } from "./QuickPick.svelte";
   import { changes, conflicts, emptyDeco, parseStatus, staged, treeDecorations, type GitFile, type GitStatus } from "./gitStatus";
@@ -56,11 +56,10 @@
     refreshBranches();
   }
 
-  /** Branch of each other folder that has open tabs (tab hints); agents may switch them at any time. */
+  /** Checkout of each folder that has open tabs (pane headers). */
   async function refreshBranches() {
-    const owners = new Set(L.panes(app.root).flatMap((p) => p.tabs).map(foreignOwner).filter(Boolean));
-    for (const o of owners)
-      app.branches[o] = await invoke<string>("git", { cwd: o, args: ["branch", "--show-current"] }).then((b) => b.trim(), () => "");
+    const owners = new Set(L.panes(app.root).flatMap((p) => p.tabs).map(tabOwner).filter(Boolean));
+    await Promise.all([...owners].map(refreshRepo));
   }
 
   /** Merge / rebase / cherry-pick in progress? Read from the (per-worktree) git dir; missing files = not in progress. */

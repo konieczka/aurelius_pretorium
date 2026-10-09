@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { closeTab, dockTab, equalize, movePath, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
+import { closeTab, dockTab, equalize, minimize, movePath, moveTab, pane, panes, restore, rootWith, split, type Tab } from "./layout";
 
 const t = (id: string): Tab => ({ id, kind: "term", cwd: "/" });
 
@@ -75,4 +75,45 @@ test("equalize gives panes an even share of each axis", () => {
   split(root, (ae as { children: { id: string }[] }).children[1].id, "row", t("f")); // [(a / (e | f)) | b | (c / d)]
   equalize(root);
   expect(root.sizes).toEqual([2, 1, 1]); // e and f each get a column's width, like b
+});
+
+const ids = (root: ReturnType<typeof rootWith>) => panes(root).map((p) => p.tabs.map((x) => x.id).join(","));
+
+test("minimize then restore puts a tab back in its pane and slot", () => {
+  const a = pane([t("a"), t("b"), t("c")]);
+  const root = rootWith(a);
+  const m = minimize(root, "b")!;
+  expect(ids(root)).toEqual(["a,c"]);
+  expect(restore(root, m)).toBe(a);
+  expect(ids(root)).toEqual(["a,b,c"]);
+  expect(a.active).toBe(1);
+});
+
+test("restore recreates a removed pane on the side it was on", () => {
+  const a = pane([t("a")]);
+  const root = rootWith(a);
+  const b = split(root, a.id, "row", t("b")); // [a | b]
+  split(root, b.id, "col", t("c")); // [a | (b / c)]
+
+  const mc = minimize(root, "c")!; // [a | b]
+  expect(ids(root)).toEqual(["a", "b"]);
+  restore(root, mc);
+  expect(ids(root)).toEqual(["a", "b", "c"]);
+  expect(root.children[1].type).toBe("split"); // c is under b again
+
+  const ma = minimize(root, "a")!; // (b / c) hoisted into the root
+  expect(ids(root)).toEqual(["b", "c"]);
+  restore(root, ma);
+  expect(ids(root)).toEqual(["a", "b", "c"]);
+  expect(root.dir).toBe("row");
+  expect(root.children[0].type).toBe("pane"); // a on the left of the rest
+});
+
+test("restore into the only, empty pane", () => {
+  const a = pane([t("a")]);
+  const root = rootWith(a);
+  const m = minimize(root, "a")!;
+  expect(ids(root)).toEqual([""]);
+  restore(root, { ...m, pane: "gone" });
+  expect(ids(root)).toEqual(["a"]);
 });

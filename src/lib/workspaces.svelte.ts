@@ -4,7 +4,7 @@ import { emitTo } from "@tauri-apps/api/event";
 import { getAllWebviewWindows, getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
-import { app, dispose, load, openWorkspace, store } from "./state.svelte";
+import { app, dispose, load, openWorkspace, store, tabOwner } from "./state.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
 import { theme } from "./theme.svelte";
 
@@ -13,12 +13,12 @@ import { theme } from "./theme.svelte";
 // backend, so a closed or moved workspace's terminals keep running and re-attach when it's shown again.
 // Storage (localStorage, shared by all windows):
 //   "workspaces"  [{id, name}] in creation order; any window writes it (create / rename / delete)
-//   "ws:<id>"     {folder, root, focused, drafts?}; written only by the window that has it open. drafts = unsaved
+//   "ws:<id>"     {folder, root, focused, minimized?, drafts?}; written only by the window that has it open. drafts = unsaved
 //                 editor text (tab id -> text) carried while the workspace isn't shown in any window
 //   "win:<label>" {open, active}: a window's workspace tabs. Removed when the window is closed, kept on quit,
 //                 so on the next launch the main window reopens the others.
 type Meta = { id: string; name: string };
-type Layout = { folder: string; root: L.Split; focused: string; drafts?: Record<string, string> };
+type Layout = { folder: string; root: L.Split; focused: string; minimized?: L.Minimized[]; drafts?: Record<string, string> };
 type Win = { open: string[]; active: string };
 
 export const ws = $state({
@@ -32,8 +32,8 @@ const win = getCurrentWindow();
 const held = new Map<string, Layout>(); // this window's open but inactive workspaces
 
 const saveMeta = () => store.set("workspaces", JSON.stringify(ws.all));
-const snapshot = (): Layout => ({ folder: app.workspace, root: app.root, focused: app.focused });
-const tabsOf = (l: Layout) => L.panes(l.root).flatMap((p) => p.tabs);
+const snapshot = (): Layout => ({ folder: app.workspace, root: app.root, focused: app.focused, minimized: app.minimized });
+const tabsOf = (l: Layout) => [...L.panes(l.root).flatMap((p) => p.tabs), ...(l.minimized ?? []).map((m) => m.tab)];
 export const nameOf = (id: string) => ws.all.find((m) => m.id === id)?.name ?? "";
 
 /** Persist the active workspace and this window's tabs (run as an effect: re-runs on any layout change). */
@@ -62,6 +62,7 @@ export function activate(id: string) {
   if (!ws.open.includes(id)) ws.open.push(id);
   ws.active = id;
   app.root = l.root;
+  app.minimized = l.minimized ?? [];
   app.focused = l.focused;
   if (l.folder) openWorkspace(l.folder); // also seeds a terminal into an empty layout
   else app.workspace = "";
@@ -91,6 +92,48 @@ export function renameWorkspace(id: string, name: string) {
   m.name = name.trim();
   saveMeta();
   if (id === ws.active) win.setTitle(m.name);
+}
+
+/** Add `tab` to a workspace's layout, in its focused pane. */
+function addTo(l: Layout, tab: L.Tab) {
+  const all = L.panes(l.root);
+  const p = all.find((p) => p.id === l.focused) ?? all[0];
+  p.tabs.push(tab);
+  p.active = p.tabs.length - 1;
+}
+
+/** Hand `tab` to workspace `id`, wherever it is: active or in the background here, open in another window, or closed. */
+function deliver(id: string, tab: L.Tab) {
+  if (id === ws.active) return addTo(snapshot(), tab);
+  const h = held.get(id);
+  if (h) return addTo(h, tab), store.set("ws:" + id, JSON.stringify(h)); // held ones are saved only when left
+  const other = ownerWindow(id);
+  if (other) return void emitTo(other, "adopt-tab", { id, tab });
+  const l = load<Layout | null>("ws:" + id, null) ?? { folder: tab.kind === "term" ? tabOwner(tab) : "", root: L.rootWith(L.pane()), focused: "" };
+  addTo(l, tab);
+  store.set("ws:" + id, JSON.stringify(l));
+}
+
+/** Move a tab of the active workspace to workspace `to` ("" = a new one, opened in the background here). A terminal's
+ * shell keeps running and re-attaches there. */
+export function moveTabTo(tabId: string, to: string) {
+  const f = L.findTab(app.root, tabId);
+  if (!f) return;
+  const tab = $state.snapshot(f.pane.tabs[f.index]) as L.Tab;
+  L.closeTab(app.root, tabId);
+  if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
+  dispose(tab, false);
+  if (to) return deliver(to, tab);
+  const id = L.uid();
+  let n = 1;
+  while (ws.all.some((m) => m.name === `Workspace ${n}`)) n++;
+  ws.all.push({ id, name: `Workspace ${n}` });
+  saveMeta();
+  const fresh = L.pane([tab]);
+  const l = { folder: (tab.kind === "term" ? tabOwner(tab) : "") || app.workspace, root: L.rootWith(fresh), focused: fresh.id };
+  held.set(id, l);
+  store.set("ws:" + id, JSON.stringify(l));
+  ws.open.push(id);
 }
 
 /** Persist `id` with its unsaved editor text, so whichever window shows it next gets both. */
@@ -242,6 +285,14 @@ export function initWorkspaces() {
   getCurrentWebviewWindow().listen<{ label: string; target: string | null }>("tear-dropped", ({ payload }) => tearDropped(payload));
   getCurrentWebviewWindow().listen<string | null>("merge-hint", ({ payload }) => (ws.incoming = payload ?? ""));
   getCurrentWebviewWindow().listen<string>("merge-into", ({ payload }) => mergeInto(payload));
+  getCurrentWebviewWindow().listen<{ id: string; tab: L.Tab }>("adopt-tab", ({ payload }) => {
+    if (ws.open.includes(payload.id)) deliver(payload.id, payload.tab);
+    else {
+      // Left this window in the meantime: it's in storage now (or another window's, which will pick it up from there)
+      const l = load<Layout | null>("ws:" + payload.id, null);
+      if (l) addTo(l, payload.tab), store.set("ws:" + payload.id, JSON.stringify(l));
+    }
+  });
   const merge = store.get("merge:" + win.label);
   if (merge) mergeInto(merge);
 

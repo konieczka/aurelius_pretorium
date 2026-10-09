@@ -21,13 +21,14 @@ export function load<T>(key: string, fallback: T): T {
   try { return JSON.parse(store.get(key) ?? "null") ?? fallback; } catch { return fallback; }
 }
 
-// root/focused/workspace belong to the active workspace (workspaces.svelte.ts swaps them); tabs from any folder can
+// root/minimized/focused/workspace belong to the active workspace (workspaces.svelte.ts swaps them); tabs from any folder can
 // sit in it while the sidebar shows another one.
 export const app = $state({
   workspace: "", // folder shown in the sidebar; new terminals start here
   root: L.rootWith(L.pane()),
+  minimized: [] as L.Minimized[], // terminal tabs parked in the status bar, oldest first
   recent: load<string[]>("recent", []), // opened folders, most recent first
-  branches: {} as Record<string, string>, // folder -> current branch, for tabs outside the workspace
+  repos: {} as Record<string, Repo>, // folder -> its git checkout, for the header above each tab
   focused: "", // pane id
   dirty: {} as Record<string, boolean>, // tab id -> unsaved
   titles: {} as Record<string, string>, // tab id -> terminal title
@@ -51,11 +52,34 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + "/"
 /** The opened folder a path belongs to (deepest match), or its parent dir if none. */
 export const ownerOf = (path: string) =>
   app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? path.slice(0, path.lastIndexOf("/"));
+const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.path);
+/** Folder a tab belongs to ("" for an unsaved note). */
+export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t)) : "");
 /** Folder a tab belongs to, or "" when it's in the current workspace. */
 export function foreignOwner(t: L.Tab) {
-  const p = t.kind === "term" ? t.cwd : t.path;
+  const p = tabPath(t);
   return !p || under(p, app.workspace) ? "" : ownerOf(p);
 }
+
+/** root = toplevel; main = the main checkout's toplevel when this is a linked worktree. "" root = not a repo. */
+export type Repo = { root: string; branch: string; main: string };
+/** Look up `folder`'s checkout; agents may switch branches at any time, so GitPanel calls this on every poll. */
+export async function refreshRepo(folder: string) {
+  const git = (args: string[]) => invoke<string>("git", { cwd: folder, args }).then((o) => o.trim());
+  try {
+    const [[root, gitDir, common], branch] = await Promise.all([
+      git(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"]).then((o) => o.split("\n")),
+      git(["branch", "--show-current"]).then((b) => b || git(["rev-parse", "--short", "HEAD"])).catch(() => ""),
+    ]);
+    const main = gitDir === common ? "" : common.replace(/\/\.git\/?$/, "");
+    app.repos[folder] = { root, branch, main };
+  } catch {
+    app.repos[folder] = { root: "", branch: "", main: "" };
+  }
+}
+
+/** Every tab of the workspace, minimized ones included. */
+export const allTabs = () => [...L.panes(app.root).flatMap((p) => p.tabs), ...app.minimized.map((m) => m.tab)];
 
 export function focusedPane(): L.Pane {
   const all = L.panes(app.root);
@@ -85,7 +109,7 @@ export function openWorkspace(path: string) {
   app.selectedDir = path;
   app.creating = null;
   app.selectedPath = "";
-  if (!L.panes(app.root).some((p) => p.tabs.length)) app.root = L.rootWith(L.pane([term()]));
+  if (!app.minimized.length && !L.panes(app.root).some((p) => p.tabs.length)) app.root = L.rootWith(L.pane([term()]));
   if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
 }
 
@@ -147,13 +171,34 @@ export function activate(tabId: string) {
 }
 
 export async function closeTab(tabId: string) {
+  const mi = app.minimized.findIndex((m) => m.tab.id === tabId);
+  if (mi >= 0) return dispose(app.minimized.splice(mi, 1)[0].tab);
   const f = L.findTab(app.root, tabId);
   if (!f) return;
   const t = f.pane.tabs[f.index];
   if (app.dirty[t.id] && !(await ask("Discard unsaved changes?", { kind: "warning" }))) return;
   dispose(t);
   L.closeTab(app.root, tabId);
-  if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
+  fixFocus();
+}
+
+const fixFocus = () => L.panes(app.root).some((p) => p.id === app.focused) || (app.focused = L.panes(app.root)[0].id);
+
+/** Park a tab in the status bar; its shell keeps running. */
+export function minimizeTab(tabId: string) {
+  const m = L.minimize(app.root, tabId);
+  if (!m) return;
+  app.minimized.push(m);
+  fixFocus();
+}
+
+/** Put a minimized tab back where it was (or as near as the layout now allows) and focus it. */
+export function restoreTab(tabId: string) {
+  const i = app.minimized.findIndex((m) => m.tab.id === tabId);
+  if (i < 0) return;
+  closeViews();
+  const [m] = app.minimized.splice(i, 1);
+  app.focused = L.restore(app.root, m).id;
 }
 
 /** Drop a tab's view; `kill = false` leaves a terminal's shell running (its workspace moved or was closed). */
