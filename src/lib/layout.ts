@@ -2,7 +2,8 @@
 // Ops mutate in place (works on plain objects and on Svelte $state proxies).
 
 export type Tab =
-  | { id: string; kind: "term"; cwd: string }
+  // agent: coding agent CLI running in it when last looked (see agents.svelte.ts)
+  | { id: string; kind: "term"; cwd: string; agent?: string }
   | { id: string; kind: "file"; path: string; preview?: boolean }
   // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree)
   | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string };

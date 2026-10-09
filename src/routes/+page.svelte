@@ -9,6 +9,7 @@
   import FileTree, { treeMenu } from "$lib/FileTree.svelte";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
+  import { watchAgents } from "$lib/agents.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import Usage from "$lib/Usage.svelte";
@@ -19,6 +20,7 @@
 
   initWorkspaces();
   $effect(save);
+  $effect(watchAgents);
   $effect(() => {
     if (app.workspace) return watchGit();
   });

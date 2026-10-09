@@ -95,6 +95,7 @@ async fn git(cwd: String, args: Vec<String>) -> Res<String> {
 
 /// Attach `on_data` to the tab's shell, spawning it if it doesn't exist yet. Re-attaching replays recent output first.
 #[tauri::command]
+/// Returns whether it spawned a new shell (false = re-attached to a running one).
 fn pty_open(
     ptys: State<Ptys>,
     id: String,
@@ -102,7 +103,7 @@ fn pty_open(
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
-) -> Res<()> {
+) -> Res<bool> {
     let mut sessions = ptys.sessions.lock().unwrap();
     if let Some(s) = sessions.get(&id) {
         let mut out = s.out.lock().unwrap();
@@ -114,7 +115,7 @@ fn pty_open(
         }
         out.chan = Some(on_data);
         let _ = s.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
-        return Ok(());
+        return Ok(false);
     }
 
     let pair = native_pty_system()
@@ -170,7 +171,7 @@ fn pty_open(
     });
 
     sessions.insert(id, Session { writer, master: pair.master, child, out });
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]
@@ -194,6 +195,57 @@ fn pty_kill(ptys: State<Ptys>, id: String) {
     if let Some(mut s) = ptys.sessions.lock().unwrap().remove(&id) {
         let _ = s.child.kill();
     }
+}
+
+/// Coding agent CLIs a terminal can run, by the command that starts them (Antigravity's is `agy`).
+const AGENTS: [&str; 5] = ["claude", "codex", "agy", "grok", "opencode"];
+
+/// The agent a process command line runs: its program, or the script given to an interpreter (npm installs such as
+/// Codex's are `node .../bin/codex`). Names may carry an extension or a version: claude.exe, codex.js, grok-1.0.50.
+fn agent_in(args: &str) -> Option<&'static str> {
+    // ponytail: splits on whitespace, so an install path with spaces isn't recognized.
+    let name = |w: &str| w.rsplit('/').next().unwrap_or(w).split('.').next().unwrap_or("").to_string();
+    let mut words = args.split_whitespace();
+    let mut prog = name(words.next()?);
+    if ["node", "bun", "deno", "sh", "bash", "zsh", "python", "python3"].contains(&prog.as_str()) {
+        prog = name(words.find(|w| !w.starts_with('-'))?);
+    }
+    AGENTS.iter().copied().find(|a| {
+        prog == *a || prog.strip_prefix(a).and_then(|r| r.strip_prefix('-')).is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+    })
+}
+
+/// Which agent each shell has in the foreground: tab id -> agent command, or None when the shell itself is (or the
+/// job isn't an agent). Only tabs with a shell are listed. Polled by the windows.
+#[tauri::command]
+async fn pty_agents(ptys: State<'_, Ptys>) -> Res<HashMap<String, Option<String>>> {
+    let mut agents: HashMap<String, Option<String>> = HashMap::new();
+    let mut jobs: Vec<(String, i32)> = Vec::new(); // tab id, foreground process group (other than the shell)
+    for (id, s) in ptys.sessions.lock().unwrap().iter() {
+        agents.insert(id.clone(), None);
+        #[cfg(unix)]
+        if let Some(pg) = s.master.process_group_leader() {
+            if s.child.process_id() != Some(pg as u32) {
+                jobs.push((id.clone(), pg));
+            }
+        }
+    }
+    if jobs.is_empty() {
+        return Ok(agents);
+    }
+    let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pgid=,args="]).output())
+        .await
+        .map_err(err)?
+        .map_err(err)?;
+    // Any process in the job counts: the agent may be a child of a wrapper.
+    for line in String::from_utf8_lossy(&ps.stdout).lines() {
+        let Some((pg, args)) = line.trim_start().split_once(' ') else { continue };
+        let Some(agent) = agent_in(args) else { continue };
+        for (id, _) in jobs.iter().filter(|(_, j)| pg.parse() == Ok(*j)) {
+            agents.insert(id.clone(), Some(agent.to_string()));
+        }
+    }
+    Ok(agents)
 }
 
 /// Is the left mouse button physically held right now (regardless of which window has the events)?
@@ -533,7 +585,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_agents, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -541,6 +593,22 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recognizes_agents_by_program_or_script() {
+        use super::agent_in;
+        assert_eq!(agent_in("claude --model opus"), Some("claude"));
+        assert_eq!(agent_in("/opt/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"), Some("claude"));
+        assert_eq!(agent_in("node /Users/me/.bun/bin/codex resume"), Some("codex"));
+        assert_eq!(agent_in("node --no-warnings /x/opencode.js"), Some("opencode"));
+        assert_eq!(agent_in("/Users/me/.grok/bin/grok-1.0.50"), Some("grok"));
+        assert_eq!(agent_in("agy"), Some("agy"));
+        assert_eq!(agent_in("/bin/sh ./codex --flag"), Some("codex"));
+        assert_eq!(agent_in("vim claude.md"), None);
+        assert_eq!(agent_in("node server.js"), None);
+        assert_eq!(agent_in("claude-monitor"), None);
+        assert_eq!(agent_in("-zsh"), None);
+    }
+
     #[test]
     fn hold_moves_into_holding_and_back() {
         let base = std::env::temp_dir().join(format!("fc-hold-{}", std::process::id()));
