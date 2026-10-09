@@ -1,6 +1,6 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Menu } from "@tauri-apps/api/menu";
+  import { popupMenu, sep } from "./contextMenu";
   import { app, clipboardFiles, clipFile, copyText, deleteSelected, finishCreate, finishRename, moveInto, openFile, paste, startCreate } from "./state.svelte";
 
   /** VS Code-style right-click menu for a tree entry (or the workspace root: no cut/copy/rename/delete). */
@@ -12,31 +12,27 @@
     app.selectedDir = dir;
     app.selectedPath = root ? "" : path;
     const canPaste = (await clipboardFiles()).length > 0;
-    const sep = { item: "Separator" } as const;
     const create = (kind: "file" | "dir") => () => ((app.selectedDir = dir), startCreate(kind));
-    const menu = await Menu.new({
-      items: [
-        { text: "New File…", action: create("file") },
-        { text: "New Folder…", action: create("dir") },
+    await popupMenu([
+      { text: "New File…", action: create("file") },
+      { text: "New Folder…", action: create("dir") },
+      sep,
+      { text: "Reveal in Finder", action: () => invoke("reveal_path", { path }).catch(() => {}) },
+      sep,
+      ...(root ? [] : [
+        { text: "Cut", accelerator: "CmdOrCtrl+X", action: () => clipFile(path, true) },
+        { text: "Copy", accelerator: "CmdOrCtrl+C", action: () => clipFile(path, false) },
+      ]),
+      { text: "Paste", accelerator: "CmdOrCtrl+V", enabled: canPaste, action: () => paste(dir) },
+      sep,
+      { text: "Copy Path", action: () => copyText(path) },
+      { text: "Copy Relative Path", action: () => copyText(path.slice(app.workspace.length + 1) || ".") },
+      ...(root ? [] : [
         sep,
-        { text: "Reveal in Finder", action: () => invoke("reveal_path", { path }).catch(() => {}) },
-        sep,
-        ...(root ? [] : [
-          { text: "Cut", accelerator: "CmdOrCtrl+X", action: () => clipFile(path, true) },
-          { text: "Copy", accelerator: "CmdOrCtrl+C", action: () => clipFile(path, false) },
-        ]),
-        { text: "Paste", accelerator: "CmdOrCtrl+V", enabled: canPaste, action: () => paste(dir) },
-        sep,
-        { text: "Copy Path", action: () => copyText(path) },
-        { text: "Copy Relative Path", action: () => copyText(path.slice(app.workspace.length + 1) || ".") },
-        ...(root ? [] : [
-          sep,
-          { text: "Rename…", action: () => (app.renaming = path) },
-          { text: "Delete", accelerator: "CmdOrCtrl+Backspace", action: deleteSelected },
-        ]),
-      ],
-    });
-    await menu.popup();
+        { text: "Rename…", action: () => (app.renaming = path) },
+        { text: "Delete", accelerator: "CmdOrCtrl+Backspace", action: deleteSelected },
+      ]),
+    ]);
   }
 </script>
 
