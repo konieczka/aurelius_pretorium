@@ -321,6 +321,107 @@ fn move_path(from: String, to: String) -> Res<()> {
     std::fs::rename(from, to).map_err(err)
 }
 
+/// Copy a file or folder into `dir`, Finder-style: "a.txt", then "a copy.txt", "a copy 2.txt"... Returns the new path.
+#[tauri::command]
+fn copy_path(from: String, dir: String) -> Res<String> {
+    let src = Path::new(&from);
+    let name = src.file_name().ok_or("nothing to copy")?.to_string_lossy().into_owned();
+    // Folders and dotfiles have no extension to keep at the end.
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && !src.is_dir() => (&name[..i], &name[i..]),
+        _ => (name.as_str(), ""),
+    };
+    let to = (0..)
+        .map(|n| Path::new(&dir).join(match n {
+            0 => name.clone(),
+            1 => format!("{stem} copy{ext}"),
+            _ => format!("{stem} copy {n}{ext}"),
+        }))
+        .find(|p| !p.exists())
+        .unwrap();
+    copy_rec(src, &to).map_err(err)?;
+    Ok(to.to_string_lossy().into_owned())
+}
+
+fn copy_rec(from: &Path, to: &Path) -> std::io::Result<()> {
+    // ponytail: symlinks are copied as what they point to (a link to a folder fails); recreate links if that matters.
+    if std::fs::symlink_metadata(from)?.is_dir() {
+        std::fs::create_dir(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            copy_rec(&e.path(), &to.join(e.file_name()))?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// Put a file on the system clipboard, the way Finder's Copy does (Finder and other apps can paste it).
+#[tauri::command]
+fn clipboard_set_file(path: String) -> Res<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::runtime::ProtocolObject;
+        use objc2_app_kit::NSPasteboard;
+        use objc2_foundation::{NSArray, NSString, NSURL};
+        let pb = NSPasteboard::generalPasteboard();
+        pb.clearContents();
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
+        if !pb.writeObjects(&NSArray::from_retained_slice(&[ProtocolObject::from_retained(url)])) {
+            return Err("Couldn't write to the clipboard".into());
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // ponytail: other platforms keep it in-app only; wire up their file clipboards if we ship there.
+        *CLIP.lock().unwrap() = vec![path];
+    }
+    Ok(())
+}
+
+/// Files on the system clipboard (copied here or in Finder etc.), if any.
+#[tauri::command]
+fn clipboard_files() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::ClassType;
+        use objc2_app_kit::{NSPasteboard, NSPasteboardURLReadingFileURLsOnlyKey};
+        use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSURL};
+        let pb = NSPasteboard::generalPasteboard();
+        let classes = NSArray::from_slice(&[NSURL::class()]);
+        let yes = NSNumber::new_bool(true);
+        let opts = NSDictionary::from_slices(&[unsafe { NSPasteboardURLReadingFileURLsOnlyKey }], &[&*yes as &objc2::runtime::AnyObject]);
+        let Some(objs) = (unsafe { pb.readObjectsForClasses_options(&classes, Some(&opts)) }) else { return vec![] };
+        objs.iter()
+            .filter_map(|o| o.downcast::<NSURL>().ok())
+            .filter_map(|u| u.path().map(|p| p.to_string()))
+            .collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    CLIP.lock().unwrap().clone()
+}
+
+#[cfg(not(target_os = "macos"))]
+static CLIP: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+#[tauri::command]
+fn reveal_path(path: String) -> Res<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "macos")]
+    cmd.args(["-R", &path]);
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "windows")]
+    cmd.arg(format!("/select,{path}"));
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    cmd.arg(Path::new(&path).parent().unwrap_or(Path::new("/")));
+    cmd.spawn().map(|_| ()).map_err(err)
+}
+
 /// Move `path` into a fresh subfolder of `dir` (the undo holding area) and return where it went.
 fn hold(path: &Path, dir: &Path) -> std::io::Result<PathBuf> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -400,7 +501,7 @@ pub fn run() {
         })
         .manage(Ptys::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path, git
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -422,4 +523,23 @@ mod tests {
         assert!(src.exists());
         std::fs::remove_dir_all(&base).unwrap();
     }
+
+    #[test]
+    fn copy_picks_free_names_and_recurses() {
+        let base = std::env::temp_dir().join(format!("fc-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src/sub")).unwrap();
+        std::fs::write(base.join("src/sub/a.txt"), "hi").unwrap();
+        let dir = base.join("src").to_string_lossy().into_owned();
+        let file = base.join("src/sub/a.txt").to_string_lossy().into_owned();
+        let sub = base.join("src/sub").to_string_lossy().into_owned();
+        let sub_dir = sub.clone();
+        assert!(super::copy_path(file.clone(), sub_dir.clone()).unwrap().ends_with("a copy.txt"));
+        assert!(super::copy_path(file, sub_dir).unwrap().ends_with("a copy 2.txt"));
+        let copied = super::copy_path(sub, dir).unwrap();
+        assert!(copied.ends_with("sub copy"));
+        assert_eq!(std::fs::read_to_string(format!("{copied}/a copy 2.txt")).unwrap(), "hi");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }
+

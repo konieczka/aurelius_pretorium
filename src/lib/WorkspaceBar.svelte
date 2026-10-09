@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Plus, X } from "@lucide/svelte";
+  import { Monitor, Moon, Plus, Sun, X } from "@lucide/svelte";
+  import { cycleTheme, theme } from "./theme.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
@@ -9,6 +10,7 @@
   } from "./workspaces.svelte";
 
   let editing = $state(""); // workspace id being renamed
+  const ThemeIcon = $derived({ light: Sun, dark: Moon, system: Monitor }[theme.mode]);
 
   async function menu(id: string) {
     const v = await pick(nameOf(id), [
@@ -92,6 +94,7 @@
 </script>
 
 <div class="bar" class:merging={ws.incoming} role="tablist" tabindex="-1" bind:this={bar} onpointermove={move} onpointerup={up} onlostpointercapture={up}>
+  <span class="mark"></span>
   {#each ws.open as id (id)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
@@ -127,6 +130,9 @@
   {/each}
   {#if ws.incoming}<div class="ws ghost"><span class="name">{nameOf(ws.incoming)}</span></div>{/if}
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
+  <button class="icon-btn theme" onclick={cycleTheme} title="Theme: {theme.mode}" aria-label="Theme: {theme.mode}. Click to change.">
+    <ThemeIcon size={14} strokeWidth={1.5} />
+  </button>
 </div>
 
 <style>
@@ -159,8 +165,15 @@
       transform: translateY(-4px);
     }
   }
-  .bar > .icon-btn {
+  .bar > .icon-btn,
+  .bar > .mark {
     align-self: center;
+  }
+  .bar > .mark {
+    margin: 0 6px 0 4px;
+  }
+  .theme {
+    margin-left: auto;
   }
   .ws {
     position: relative;

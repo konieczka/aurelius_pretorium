@@ -1,18 +1,18 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, RefreshCw } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
-  import FileTree from "$lib/FileTree.svelte";
+  import FileTree, { treeMenu } from "$lib/FileTree.svelte";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, moveInto, undoTree, newTerminal, openWorkspace, splitFocused, startCreate,
+    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, openWorkspace, splitFocused, startCreate,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -40,11 +40,18 @@
     const k = e.key.toLowerCase();
     // Typing into a pane hands ⌘Z back to it. Programmatic focus (a tab mounting) deliberately doesn't.
     if (!e.metaKey && !e.ctrlKey && (e.target as Element).closest?.("main")) app.treeFocused = false;
-    // Tree undo/delete only when the sidebar has focus; otherwise ⌘Z belongs to the editor/terminal.
-    if (app.treeFocused && app.sidebar === "files" && !(e.target as Element).closest?.("input, textarea") && (e.metaKey || e.ctrlKey) && !e.shiftKey && (k === "z" || k === "backspace")) {
+    // Tree undo/delete/cut/copy/paste only when the sidebar has focus; otherwise ⌘Z belongs to the editor/terminal.
+    if (app.treeFocused && app.sidebar === "files" && !(e.target as Element).closest?.("input, textarea") && (e.metaKey || e.ctrlKey) && !e.shiftKey && ["z", "x", "c", "v", "backspace"].includes(k)) {
+      const p = app.selectedPath;
+      const act =
+        k === "z" ? undoTree :
+        k === "backspace" ? deleteSelected :
+        k === "v" ? () => paste(app.selectedDir || app.workspace) :
+        p ? () => clipFile(p, k === "x") : null;
+      if (!act) return;
       e.preventDefault();
       e.stopPropagation();
-      return k === "z" ? undoTree() : deleteSelected();
+      return act();
     }
     if (!e.metaKey) return;
     const t = activeTab();
@@ -78,9 +85,9 @@
     <WorkspaceBar />
     <aside onpointerdown={() => (app.treeFocused = true)}>
       <header>
-        <span class="mark"></span>
-        <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">{app.workspace.split("/").pop()}</button>
-        <button class="icon-btn" onclick={pickFolder} title="Open folder (⌘O)"><FolderOpen size={15} strokeWidth={1.5} /></button>
+        <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">
+          <FolderRoot size={14} strokeWidth={1.5} /><span class="name">{app.workspace.split("/").pop()}</span><ChevronsUpDown size={13} strokeWidth={1.5} />
+        </button>
       </header>
       <div class="toolbar">
         <div class="modes" role="tablist">
@@ -108,6 +115,7 @@
           class="tree"
           class:drop={app.dropDir === app.workspace}
           onclick={(e) => e.target === e.currentTarget && (app.selectedDir = app.workspace)}
+          oncontextmenu={(e) => treeMenu(e, app.workspace, true)}
           onkeydown={() => {}}
           ondragover={(e) => {
             if (!e.dataTransfer?.types.includes("text/x-path")) return;
@@ -213,19 +221,32 @@
     box-sizing: border-box;
   }
   .ws {
-    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
     min-width: 0;
-    padding: 0;
+    max-width: 100%;
+    padding: 3px 6px;
+    margin-left: -6px;
     border: 0;
+    border-radius: 6px;
     background: none;
-    text-align: left;
+    color: inherit;
     cursor: pointer;
-    margin-left: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .ws:hover {
+    background: var(--accent);
+  }
+  .ws > :global(svg) {
+    flex: none;
+    color: var(--muted-foreground);
+  }
+  .ws .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
-    font-weight: 500;
   }
   .tree {
     flex: 1;

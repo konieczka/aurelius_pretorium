@@ -32,6 +32,8 @@ export const app = $state({
   creating: null as null | { dir: string; kind: "file" | "dir" }, // inline name input in the tree
   dropDir: "", // folder highlighted while dragging a tree entry
   selectedPath: "", // tree row ⌘⌫ deletes
+  renaming: "", // tree path with the inline rename input
+  cut: "", // tree path Cut to the clipboard: pasting it in the tree moves it (elsewhere, e.g. Finder, it's a copy)
   sidebar: "files" as "files" | "git",
   conflicts: {} as Record<string, number>, // tab id -> conflict blocks in the editor
   gitVersion: 0, // bumped on save / git ops: diff views refetch
@@ -215,6 +217,57 @@ async function softDelete(path: string): Promise<string | null> {
   if (held === null) message(`Moved to the Trash: ${path}\n(It's on another disk, so this can't be undone here.)`);
   return held ?? "";
 }
+
+/** Tree rename (inline input). */
+export async function finishRename(from: string, name: string) {
+  if (app.renaming !== from) return; // already finished (Enter, then the blur from unmounting)
+  app.renaming = "";
+  name = name.trim();
+  if (!name || name === from.slice(from.lastIndexOf("/") + 1)) return;
+  if (name.includes("/") || name === "." || name === "..") return fail(`Invalid name: ${name}`);
+  const to = `${parent(from)}/${name}`;
+  if (await doMove(from, to)) record({ kind: "move", from, to });
+}
+
+/** Tree Cut/Copy: the file goes on the system clipboard, like Finder's Copy. */
+export async function clipFile(path: string, cut: boolean) {
+  try {
+    await invoke("clipboard_set_file", { path });
+  } catch (e) {
+    return fail(e);
+  }
+  app.cut = cut ? path : "";
+}
+
+export const clipboardFiles = () => invoke<string[]>("clipboard_files");
+
+/** Paste the clipboard's files (from the tree, Finder...) into `dir`: our own Cut moves, the rest is copied. */
+export async function paste(dir: string) {
+  for (const from of await clipboardFiles()) {
+    if (from === app.cut) {
+      app.cut = "";
+      await moveInto(from, dir);
+      continue;
+    }
+    if (under(dir, from)) {
+      fail("Can't paste a folder into itself.");
+      continue;
+    }
+    let path: string;
+    try {
+      path = await invoke<string>("copy_path", { from, dir });
+    } catch (e) {
+      fail(e);
+      continue;
+    }
+    record({ kind: "create", path });
+    app.expanded[dir] = true;
+    app.selectedPath = path;
+    app.treeVersion++;
+  }
+}
+
+export const copyText = (text: string) => navigator.clipboard.writeText(text).catch(fail);
 
 export async function deleteSelected() {
   const path = app.selectedPath;

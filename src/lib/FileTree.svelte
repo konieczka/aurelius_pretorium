@@ -1,8 +1,48 @@
-<script lang="ts">
+<script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { ChevronRight, File, FilePlus, Folder, FolderOpen, FolderPlus, Trash2 } from "@lucide/svelte";
+  import { Menu } from "@tauri-apps/api/menu";
+  import { app, clipboardFiles, clipFile, copyText, deleteSelected, finishCreate, finishRename, moveInto, openFile, paste, startCreate } from "./state.svelte";
+
+  /** VS Code-style right-click menu for a tree entry (or the workspace root: no cut/copy/rename/delete). */
+  export async function treeMenu(ev: MouseEvent, path: string, isDir: boolean) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const dir = isDir ? path : path.slice(0, path.lastIndexOf("/"));
+    const root = path === app.workspace;
+    app.selectedDir = dir;
+    app.selectedPath = root ? "" : path;
+    const canPaste = (await clipboardFiles()).length > 0;
+    const sep = { item: "Separator" } as const;
+    const create = (kind: "file" | "dir") => () => ((app.selectedDir = dir), startCreate(kind));
+    const menu = await Menu.new({
+      items: [
+        { text: "New File…", action: create("file") },
+        { text: "New Folder…", action: create("dir") },
+        sep,
+        { text: "Reveal in Finder", action: () => invoke("reveal_path", { path }).catch(() => {}) },
+        sep,
+        ...(root ? [] : [
+          { text: "Cut", accelerator: "CmdOrCtrl+X", action: () => clipFile(path, true) },
+          { text: "Copy", accelerator: "CmdOrCtrl+C", action: () => clipFile(path, false) },
+        ]),
+        { text: "Paste", accelerator: "CmdOrCtrl+V", enabled: canPaste, action: () => paste(dir) },
+        sep,
+        { text: "Copy Path", action: () => copyText(path) },
+        { text: "Copy Relative Path", action: () => copyText(path.slice(app.workspace.length + 1) || ".") },
+        ...(root ? [] : [
+          sep,
+          { text: "Rename…", action: () => (app.renaming = path) },
+          { text: "Delete", accelerator: "CmdOrCtrl+Backspace", action: deleteSelected },
+        ]),
+      ],
+    });
+    await menu.popup();
+  }
+</script>
+
+<script lang="ts">
+  import { ChevronRight, File, FilePlus, Folder, FolderOpen, FolderPlus } from "@lucide/svelte";
   import FileTree from "./FileTree.svelte";
-  import { app, deleteSelected, finishCreate, moveInto, openFile } from "./state.svelte";
 
   type Entry = { name: string; is_dir: boolean };
   let { path, depth = 0 }: { path: string; depth?: number } = $props();
@@ -50,44 +90,55 @@
   {#each entries as e (e.name)}
     {@const full = `${path}/${e.name}`}
     {@const dir = e.is_dir ? full : path}
-    <button
-      class="row"
-      class:active={full === app.selectedPath}
-      class:drop={e.is_dir && app.dropDir === full}
-      title={full}
-      draggable="true"
-      ondragstart={(ev) => ev.dataTransfer?.setData("text/x-path", full)}
-      ondragend={() => (app.dropDir = "")}
-      ondragover={(ev) => over(ev, dir)}
-      ondrop={(ev) => drop(ev, dir)}
-      onclick={() => {
-        app.selectedDir = dir;
-        app.selectedPath = full;
-        if (e.is_dir) app.expanded[full] = !app.expanded[full];
-        else openFile(full);
-      }}
-    >
-      <span class="chev" class:open={app.expanded[full]}>
-        {#if e.is_dir}<ChevronRight size={12} strokeWidth={1.5} />{/if}
-      </span>
-      {#if e.is_dir}
-        {#if app.expanded[full]}<FolderOpen size={14} strokeWidth={1.5} />{:else}<Folder size={14} strokeWidth={1.5} />{/if}
-      {:else}
-        <File size={14} strokeWidth={1.5} />
-      {/if}
-      <span class="name">{e.name}</span>
-      <!-- Not a <button>: can't nest inside the row button. ⌘⌫ is the keyboard path. -->
-      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
-      <span
-        class="del"
-        role="button"
-        title="Delete (⌘⌫, undo with ⌘Z)"
-        onclick={(ev) => {
-          ev.stopPropagation();
+    {#if app.renaming === full}
+      <div class="row creating active">
+        <span class="chev"></span>
+        {#if e.is_dir}<Folder size={14} strokeWidth={1.5} />{:else}<File size={14} strokeWidth={1.5} />{/if}
+        <input
+          value={e.name}
+          {@attach (el) => {
+            el.focus();
+            const dot = e.is_dir ? -1 : e.name.lastIndexOf(".");
+            el.setSelectionRange(0, dot > 0 ? dot : e.name.length); // the name without its extension, like VS Code
+          }}
+          onkeydown={(ev) => {
+            if (ev.key === "Enter") finishRename(full, ev.currentTarget.value);
+            if (ev.key === "Escape") app.renaming = "";
+          }}
+          onblur={(ev) => finishRename(full, ev.currentTarget.value)}
+        />
+      </div>
+    {:else}
+      <button
+        class="row"
+        class:active={full === app.selectedPath}
+        class:cut={app.cut === full}
+        class:drop={e.is_dir && app.dropDir === full}
+        title={full}
+        draggable="true"
+        ondragstart={(ev) => ev.dataTransfer?.setData("text/x-path", full)}
+        ondragend={() => (app.dropDir = "")}
+        ondragover={(ev) => over(ev, dir)}
+        ondrop={(ev) => drop(ev, dir)}
+        oncontextmenu={(ev) => treeMenu(ev, full, e.is_dir)}
+        onclick={() => {
+          app.selectedDir = dir;
           app.selectedPath = full;
-          deleteSelected();
-        }}><Trash2 size={13} strokeWidth={1.5} /></span>
-    </button>
+          if (e.is_dir) app.expanded[full] = !app.expanded[full];
+          else openFile(full);
+        }}
+      >
+        <span class="chev" class:open={app.expanded[full]}>
+          {#if e.is_dir}<ChevronRight size={12} strokeWidth={1.5} />{/if}
+        </span>
+        {#if e.is_dir}
+          {#if app.expanded[full]}<FolderOpen size={14} strokeWidth={1.5} />{:else}<Folder size={14} strokeWidth={1.5} />{/if}
+        {:else}
+          <File size={14} strokeWidth={1.5} />
+        {/if}
+        <span class="name">{e.name}</span>
+      </button>
+    {/if}
     {#if e.is_dir && app.expanded[full]}
       <FileTree path={full} depth={depth + 1} />
     {/if}
@@ -172,23 +223,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .del {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin-right: -4px;
-    border-radius: var(--radius-sm);
-    opacity: 0;
-    transition: opacity var(--dur-quick) var(--ease-standard);
-  }
-  .row:hover .del {
-    opacity: 1;
-  }
-  .del:hover {
-    background: var(--accent);
-  }
-  .del:hover :global(svg) {
-    color: var(--destructive);
+  .row.cut {
+    opacity: 0.5;
   }
 </style>
