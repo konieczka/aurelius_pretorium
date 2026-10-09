@@ -145,7 +145,9 @@
         app.dirty[tabId] = draft !== undefined; // also nudges reactivity so the preview renders once loaded
       },
       (err) => {
-        e.error = String(err);
+        // read_file reads text: anything else (fonts, archives, binaries) fails to decode.
+        e.error = /valid UTF-8/.test(String(err)) ? "This is a binary file, so it can't be shown as text." : String(err);
+        e.host.classList.add("unreadable");
         e.host.textContent = e.error;
         app.dirty[tabId] = false;
       },
@@ -158,6 +160,8 @@
   import { untrack } from "svelte";
   import { Check, ChevronDown, ChevronUp } from "@lucide/svelte";
   import { git, markResolved } from "./GitPanel.svelte";
+  import Media from "./Media.svelte";
+  import { isSvg } from "./media";
   let { tabId, path, preview }: { tabId: string; path: string; preview: boolean } = $props();
   let el: HTMLDivElement;
 
@@ -183,7 +187,10 @@
   }
 
   // Sanitizing is mandatory: preview HTML runs in a window that can call the pty commands.
-  const html = $derived(preview && app.dirty[tabId] !== undefined ? DOMPurify.sanitize(marked.parse(text(tabId), { async: false })) : "");
+  const svg = $derived(isSvg(path));
+  const html = $derived(preview && !svg && app.dirty[tabId] !== undefined ? DOMPurify.sanitize(marked.parse(text(tabId), { async: false })) : "");
+  // SVG preview draws the editor's text (unsaved edits too) as an <img>: scripts inside never run.
+  const svgSrc = $derived(preview && svg && app.dirty[tabId] !== undefined ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text(tabId))}` : "");
 </script>
 
 <div class="editor" bind:this={el} class:hidden={preview}></div>
@@ -199,7 +206,9 @@
     {/if}
   </div>
 {/if}
-{#if preview}
+{#if preview && svg}
+  {#if svgSrc}{#key svgSrc}<Media {path} src={svgSrc} />{/key}{/if}
+{:else if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="md selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
     {@html html}
@@ -253,6 +262,12 @@
   }
   .editor :global(.editor-host) {
     height: 100%;
+  }
+  .editor :global(.editor-host.unreadable) {
+    display: grid;
+    place-items: center;
+    color: var(--muted-foreground);
+    font-size: 13px;
   }
   /* Markdown preview: Aurelius MarkdownContent rules */
   .md {

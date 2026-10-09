@@ -3,6 +3,7 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
 import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
+import { hasPreview } from "./media";
 import { closeUsage } from "./usageView.svelte";
 
 // localStorage is shared by all windows of the app.
@@ -117,7 +118,7 @@ export function openFile(path: string) {
   const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
   if (existing) return activate(existing.id);
   const p = focusedPane();
-  p.tabs.push({ id: L.uid(), kind: "file", path, preview: path.endsWith(".md") });
+  p.tabs.push({ id: L.uid(), kind: "file", path, preview: hasPreview(path) });
   p.active = p.tabs.length - 1;
 }
 
