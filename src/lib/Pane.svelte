@@ -8,12 +8,16 @@
   import Diff from "./Diff.svelte";
   import Media from "./Media.svelte";
   import { hasPreview, mediaKind } from "./media";
+  import ProviderIcon from "./ProviderIcon.svelte";
+  import { agentProvider } from "./agents.svelte";
+  import { providerName } from "./usageStats";
 
   let { pane = $bindable() }: { pane: Pane } = $props();
   const tab = $derived(pane.tabs[pane.active]);
   const label = (t: Pane["tabs"][number]) =>
     t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
     t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
+    t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] :
     app.titles[t.id] || "Terminal";
   /** "folder · branch" for tabs that belong to another folder than the one in the sidebar. */
   const hint = (t: Pane["tabs"][number]) => {
@@ -76,7 +80,7 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<ProviderIcon provider={agentProvider[t.agent]} size={13} />{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
         {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}

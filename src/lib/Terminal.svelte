@@ -6,6 +6,8 @@
   import "@xterm/xterm/css/xterm.css";
   import { app } from "./state.svelte";
   import { theme } from "./theme.svelte";
+  import { relaunchCommand } from "./agents.svelte";
+  import * as L from "./layout";
 
   // xterm takes hex only: Aurelius tokens converted from oklch (bg = --surface, cursor = --gold).
   const palettes = {
@@ -74,10 +76,13 @@
       else term.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
     };
     const id = tabId;
-    invoke("pty_open", { id, cwd, cols: term.cols, rows: term.rows, onData })
-      .then(() => {
+    invoke<boolean>("pty_open", { id, cwd, cols: term.cols, rows: term.rows, onData })
+      .then((spawned) => {
         e.ready = true;
-        const data = pending.get(id);
+        // A fresh shell for a tab that had an agent running: start it again.
+        const tab = L.findTab(app.root, id);
+        const agent = spawned && !pending.has(id) && tab && relaunchCommand(tab.pane.tabs[tab.index]);
+        const data = pending.get(id) ?? (agent ? agent + "\r" : "");
         if (data) pending.delete(id), invoke("pty_write", { id, data });
       })
       .catch((err) => term.write(`\x1b[31m${err}\x1b[0m\r\n`));
