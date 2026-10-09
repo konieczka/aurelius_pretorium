@@ -476,6 +476,35 @@ fn flush_holding(app: &AppHandle) {
     }
 }
 
+/// Stay Awake: a `caffeinate` child while on. `-w <our pid>` makes it exit with the app, even after a crash.
+#[derive(Default)]
+struct Awake(Mutex<Option<std::process::Child>>);
+
+/// Turn Stay Awake on/off (`None` just reads it). Every window hears the change, so their buttons agree.
+#[tauri::command]
+fn stay_awake(on: Option<bool>, awake: State<Awake>, app: AppHandle) -> Res<bool> {
+    let mut child = awake.0.lock().unwrap();
+    match on {
+        Some(true) if child.is_none() => {
+            // -d: display stays on, -i: no idle system sleep.
+            let c = std::process::Command::new("/usr/bin/caffeinate")
+                .args(["-d", "-i", "-w", &std::process::id().to_string()])
+                .spawn()
+                .map_err(err)?;
+            *child = Some(c);
+        }
+        Some(false) => {
+            if let Some(mut c) = child.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+        _ => return Ok(child.is_some()),
+    }
+    let _ = app.emit("stay-awake", child.is_some());
+    Ok(child.is_some())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -500,8 +529,9 @@ pub fn run() {
             Ok(())
         })
         .manage(Ptys::default())
+        .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
