@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Sun, X } from "@lucide/svelte";
+  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
+  import { skills, toggleSkills } from "./skillsView.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -146,7 +147,17 @@
     <LayoutGrid size={14} strokeWidth={1.5} />
   </button>
   <button
-    class="icon-btn usage"
+    class="icon-btn view"
+    class:on={skills.open}
+    onclick={toggleSkills}
+    title="Skills (⇧⌘K)"
+    aria-label="Skills"
+    aria-pressed={skills.open}
+  >
+    <Brain size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view"
     class:on={usage.open}
     onclick={toggleUsage}
     title="Usage (⇧⌘U)"
@@ -210,7 +221,7 @@
   .arrange {
     margin-left: auto;
   }
-  .usage.on {
+  .view.on {
     background: var(--sidebar-accent);
     color: var(--sidebar-foreground);
   }

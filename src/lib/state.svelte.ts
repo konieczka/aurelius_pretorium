@@ -5,6 +5,10 @@ import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
 import { hasPreview } from "./media";
 import { closeUsage } from "./usageView.svelte";
+import { closeSkills } from "./skillsView.svelte";
+
+/** Opening a tab brings the panes back from the Usage or Skills view. */
+const closeViews = () => (closeUsage(), closeSkills());
 
 // localStorage is shared by all windows of the app.
 export const store = {
@@ -86,7 +90,7 @@ export function openWorkspace(path: string) {
 }
 
 export function newTerminal() {
-  closeUsage();
+  closeViews();
   const p = focusedPane();
   p.tabs.push(term());
   p.active = p.tabs.length - 1;
@@ -94,7 +98,7 @@ export function newTerminal() {
 
 /** Untitled editor tab (path ""); ⌘S asks where to save it. */
 export function newNote() {
-  closeUsage();
+  closeViews();
   const p = focusedPane();
   p.tabs.push({ id: L.uid(), kind: "file", path: "" });
   p.active = p.tabs.length - 1;
@@ -102,7 +106,7 @@ export function newNote() {
 
 /** New terminal tab in the focused pane that runs `command` once its shell starts. */
 export function runInTerminal(cwd: string, command: string) {
-  closeUsage();
+  closeViews();
   const p = focusedPane();
   const t: L.Tab = { id: L.uid(), kind: "term", cwd };
   queueInput(t.id, command + "\r");
@@ -112,12 +116,12 @@ export function runInTerminal(cwd: string, command: string) {
 }
 
 export function splitFocused(dir: "row" | "col") {
-  closeUsage();
+  closeViews();
   app.focused = L.split(app.root, focusedPane().id, dir, term()).id;
 }
 
 export function openFile(path: string) {
-  closeUsage();
+  closeViews();
   const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
   if (existing) return activate(existing.id);
   const p = focusedPane();
@@ -127,7 +131,7 @@ export function openFile(path: string) {
 
 /** Diff tab: staged = index vs HEAD, else working tree vs index; with `ref`, that commit's change. */
 export function openDiff(path: string, staged: boolean, orig?: string, ref?: string) {
-  closeUsage();
+  closeViews();
   const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "diff" && t.path === path && t.staged === staged && t.ref === ref);
   if (existing) return activate(existing.id);
   const p = focusedPane();
