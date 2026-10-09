@@ -69,6 +69,12 @@
   --merge-ours-strong: oklch(0.72 0.15 145 / 30%);
   --merge-theirs-bg: oklch(0.68 0.12 250 / 14%);
   --merge-theirs-strong: oklch(0.68 0.12 250 / 30%);
+  /* Usage series, one per AI CLI (validated together for CVD and contrast, per theme) */
+  --usage-claude: #c4623f;
+  --usage-codex: #16936d;
+  --usage-grok: #5272d0;
+  --usage-antigravity: #a07a10;
+  --usage-opencode: #b04f8f;
 }
 
 .dark {
@@ -121,6 +127,11 @@
   --merge-ours-strong: oklch(0.7 0.14 145 / 28%);
   --merge-theirs-bg: oklch(0.7 0.12 250 / 15%);
   --merge-theirs-strong: oklch(0.7 0.12 250 / 32%);
+  --usage-claude: #c96a47;
+  --usage-codex: #22a07a;
+  --usage-grok: #6481da;
+  --usage-antigravity: #b08d1c;
+  --usage-opencode: #c0619f;
 }
 
 html,
