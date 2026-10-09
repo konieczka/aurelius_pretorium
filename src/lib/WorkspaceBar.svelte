@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Monitor, Moon, Plus, Sun, X } from "@lucide/svelte";
+  import { Monitor, Moon, PanelLeft, Plus, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
+  import { app, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
@@ -95,6 +96,9 @@
 
 <div class="bar" class:merging={ws.incoming} role="tablist" tabindex="-1" bind:this={bar} onpointermove={move} onpointerup={up} onlostpointercapture={up}>
   <span class="mark"></span>
+  {#if !app.sidebarOpen}
+    <button class="icon-btn" onclick={toggleSidebar} title="Show sidebar (⌘B)" aria-label="Show sidebar"><PanelLeft size={14} strokeWidth={1.5} /></button>
+  {/if}
   {#each ws.open as id (id)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div

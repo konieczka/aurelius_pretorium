@@ -35,6 +35,7 @@ export const app = $state({
   renaming: "", // tree path with the inline rename input
   cut: "", // tree path Cut to the clipboard: pasting it in the tree moves it (elsewhere, e.g. Finder, it's a copy)
   sidebar: "files" as "files" | "git",
+  sidebarOpen: load<boolean>("sidebarOpen", true), // ⌘B / the header button hide the whole sidebar
   conflicts: {} as Record<string, number>, // tab id -> conflict blocks in the editor
   gitVersion: 0, // bumped on save / git ops: diff views refetch
   treeFocused: false, // last interaction was in the sidebar: ⌘Z / ⌘⌫ go to the tree, not the editor/terminal
@@ -58,6 +59,11 @@ export function focusedPane(): L.Pane {
 export function activeTab(): L.Tab | undefined {
   const p = focusedPane();
   return p.tabs[p.active];
+}
+
+export function toggleSidebar() {
+  app.sidebarOpen = !app.sidebarOpen;
+  store.set("sidebarOpen", String(app.sidebarOpen));
 }
 
 const term = (): L.Tab => ({ id: L.uid(), kind: "term", cwd: app.workspace });
