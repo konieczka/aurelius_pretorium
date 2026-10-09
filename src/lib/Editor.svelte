@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { save } from "@tauri-apps/plugin-dialog";
   import { EditorView, basicSetup } from "codemirror";
   import { Compartment, Transaction } from "@codemirror/state";
   import { keymap } from "@codemirror/view";
@@ -13,7 +14,7 @@
   import { findTab } from "./layout";
 
   // Editors outlive their component so unsaved edits survive tab moves.
-  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string };
+  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment };
   const entries = new Map<string, Entry>();
 
   export function disposeEditor(tabId: string) {
@@ -29,9 +30,19 @@
     const f = findTab(app.root, tabId);
     const tab = f?.pane.tabs[f.index];
     if (tab?.kind !== "file") return;
+    const untitled = !tab.path;
+    if (untitled) {
+      const p = await save({ defaultPath: `${app.workspace}/Untitled.md` });
+      if (!p) return;
+      tab.path = p;
+    }
     await invoke("write_file", { path: tab.path, content: e.view.state.doc.toString() });
     app.dirty[tabId] = false;
     app.gitVersion++;
+    if (untitled) {
+      app.treeVersion++;
+      languageFor(tab.path)?.then((support) => e.lang && e.view?.dispatch({ effects: e.lang.reconfigure(support) }));
+    }
   }
 
   /** Pick up external changes (agents, git pull/checkout) when the tab has no unsaved edits. */
@@ -107,9 +118,9 @@
     entries.set(tabId, e);
     const draft = drafts.get(tabId);
     drafts.delete(tabId);
-    (draft !== undefined ? Promise.resolve(draft) : invoke<string>("read_file", { path })).then(
+    (draft !== undefined ? Promise.resolve(draft) : !path ? Promise.resolve("") : invoke<string>("read_file", { path })).then(
       (doc) => {
-        const lang = new Compartment();
+        const lang = (e.lang = new Compartment());
         e.view = new EditorView({
           doc,
           parent: e.host,

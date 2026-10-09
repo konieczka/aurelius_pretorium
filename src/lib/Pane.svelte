@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Columns2, Eye, GitCompare, Pencil, Plus, Rows2, SquareTerminal, X } from "@lucide/svelte";
+  import { Columns2, Eye, GitCompare, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { app, closeTab, foreignOwner, newTerminal, splitFocused } from "./state.svelte";
+  import { app, closeTab, foreignOwner, newNote, newTerminal, splitFocused } from "./state.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
@@ -10,7 +10,7 @@
   let { pane = $bindable() }: { pane: Pane } = $props();
   const tab = $derived(pane.tabs[pane.active]);
   const label = (t: Pane["tabs"][number]) =>
-    t.kind === "file" ? t.path.split("/").pop() :
+    t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
     t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
     app.titles[t.id] || "Terminal";
   /** "folder · branch" for tabs that belong to another folder than the one in the sidebar. */
@@ -74,7 +74,7 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
         {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
@@ -87,7 +87,8 @@
         {#if tab.preview}<Pencil size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
       </button>
     {/if}
-    <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><Plus size={15} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={here(newNote)} title="New note (⌘N)"><NotebookPen size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><SquareTerminal size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)"><Rows2 size={14} strokeWidth={1.5} /></button>
   </div>
@@ -103,7 +104,7 @@
         {/if}
       {/key}
     {:else}
-      <div class="empty"><span><kbd>⌘T</kbd> new terminal</span><span><kbd>⌘O</kbd> open folder</span></div>
+      <div class="empty"><span><kbd>⌘T</kbd> new terminal</span><span><kbd>⌘N</kbd> new note</span><span><kbd>⌘O</kbd> open folder</span></div>
     {/if}
     {#if app.dragging}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -198,6 +199,12 @@
   }
   .bar > .icon-btn {
     align-self: center;
+    visibility: hidden;
+  }
+  /* Pane actions appear only while the bar is hovered (all have shortcuts: ⌘N/⌘T/⌘D/⇧⌘D/⌘E).
+     No fade: WKWebView doesn't repaint the end of a transition inside this scrolling bar, so they stayed on screen */
+  .bar:hover > .icon-btn {
+    visibility: visible;
   }
   .x {
     width: 20px;

@@ -12,7 +12,7 @@
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, openWorkspace, splitFocused, startCreate,
+    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -66,6 +66,7 @@
       k === "g" && e.shiftKey ? () => (app.sidebar = "git") :
       !app.workspace ? null :
       k === "t" ? newTerminal :
+      k === "n" ? newNote :
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
       k === "w" ? () => t && closeTab(t.id) :
       k === "s" ? () => t?.kind === "file" && saveEditor(t.id) :

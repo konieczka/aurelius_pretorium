@@ -80,6 +80,13 @@ export function newTerminal() {
   p.active = p.tabs.length - 1;
 }
 
+/** Untitled editor tab (path ""); ⌘S asks where to save it. */
+export function newNote() {
+  const p = focusedPane();
+  p.tabs.push({ id: L.uid(), kind: "file", path: "" });
+  p.active = p.tabs.length - 1;
+}
+
 /** New terminal tab in the focused pane that runs `command` once its shell starts. */
 export function runInTerminal(cwd: string, command: string) {
   const p = focusedPane();
