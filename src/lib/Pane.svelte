@@ -80,10 +80,10 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<ProviderIcon provider={agentProvider[t.agent]} size={13} />{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
         {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
-        {#if activity[t.id] === "busy"}<span class="working" title="Working"></span>{:else if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
+        {#if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
       </div>
@@ -203,18 +203,48 @@
     border-radius: 9999px;
     background: var(--gold);
   }
-  /* Agent state: a turning ring while it works, an ember dot when it's done or asking while you were elsewhere */
-  .working {
-    width: 8px;
-    height: 8px;
-    border: 1.5px solid var(--gold-soft);
-    border-top-color: var(--gold);
-    border-radius: 9999px;
-    animation: turn 0.9s linear infinite;
+  /* Agent state: while it works its icon breathes, with a dot pulsing beneath in step; an ember dot after the name
+     when it's done or asking while you were elsewhere */
+  .agent {
+    position: relative;
+    display: flex;
   }
-  @keyframes turn {
-    to {
-      transform: rotate(360deg);
+  .agent.working :global(svg) {
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  .agent.working::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -5px;
+    width: 3px;
+    height: 3px;
+    margin-left: -1.5px;
+    border-radius: 9999px;
+    background: var(--gold);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  /* Only brightness and glow breathe; the shape stays put */
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 0.55;
+      filter: none;
+    }
+    50% {
+      opacity: 1;
+      filter: drop-shadow(0 0 3px color-mix(in oklch, var(--gold) 70%, transparent));
+    }
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.3);
     }
   }
   .attention {
@@ -226,9 +256,12 @@
   }
   /* The global reduced-motion rule shortens animations to 1ms, which would make an infinite one strobe */
   @media (prefers-reduced-motion: reduce) {
-    .working {
+    .agent.working :global(svg),
+    .agent.working::after {
       animation: none;
-      border-color: var(--gold);
+    }
+    .agent.working :global(svg) {
+      filter: drop-shadow(0 0 2px color-mix(in oklch, var(--gold) 70%, transparent));
     }
   }
   .spacer {
