@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, PanelLeftClose, RefreshCw } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
@@ -12,7 +12,7 @@
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate,
+    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -64,6 +64,7 @@
       !app.workspace ? null :
       k === "e" && e.shiftKey ? () => (app.sidebar = "files") :
       k === "g" && e.shiftKey ? () => (app.sidebar = "git") :
+      k === "b" && !e.shiftKey ? toggleSidebar :
       !app.workspace ? null :
       k === "t" ? newTerminal :
       k === "n" ? newNote :
@@ -82,13 +83,15 @@
 <svelte:window onkeydowncapture={onKey} />
 
 {#if app.workspace}
-  <div class="app">
+  <div class="app" class:collapsed={!app.sidebarOpen}>
     <WorkspaceBar />
-    <aside onpointerdown={() => (app.treeFocused = true)}>
+    <aside inert={!app.sidebarOpen} onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">
           <FolderRoot size={14} strokeWidth={1.5} /><span class="name">{app.workspace.split("/").pop()}</span><ChevronsUpDown size={13} strokeWidth={1.5} />
         </button>
+        <span class="spacer"></span>
+        <button class="icon-btn" onclick={toggleSidebar} title="Hide sidebar (⌘B)" aria-label="Hide sidebar"><PanelLeftClose size={14} strokeWidth={1.5} /></button>
       </header>
       <div class="toolbar">
         <div class="modes" role="tablist">
@@ -155,13 +158,31 @@
     grid-template-columns: 248px 1fr;
     grid-template-rows: auto minmax(0, 1fr) auto;
     height: 100vh;
+    transition: grid-template-columns var(--dur-base) var(--ease-standard);
+  }
+  /* The column animates to 0; the sidebar keeps its 248px inside so its contents don't reflow while sliding */
+  .app.collapsed {
+    grid-template-columns: 0 1fr;
   }
   aside {
     display: flex;
     flex-direction: column;
+    min-width: 0;
     min-height: 0;
+    overflow: hidden;
     background: var(--sidebar);
     border-right: 1px solid var(--border-strong);
+    transition: opacity var(--dur-base) var(--ease-standard), visibility var(--dur-base);
+  }
+  aside > * {
+    box-sizing: border-box;
+    width: 248px;
+    flex-shrink: 0;
+  }
+  .app.collapsed aside {
+    opacity: 0;
+    visibility: hidden;
+    border-right-color: transparent;
   }
   header {
     display: flex;
