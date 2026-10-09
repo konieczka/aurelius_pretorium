@@ -1,6 +1,23 @@
 <script lang="ts">
-  import { ArrowDown, ArrowUp, CloudUpload, FolderGit2, GitBranch, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, CloudUpload, FolderGit2, GitBranch, LoaderCircle, RefreshCw, SquareTerminal } from "@lucide/svelte";
+  import { Menu } from "@tauri-apps/api/menu";
   import { branchName, git, noHead, publish, switchBranch, switchWorktree, sync } from "./GitPanel.svelte";
+  import { app, closeTab, restoreTab } from "./state.svelte";
+  import { activity, agentProvider } from "./agents.svelte";
+  import ProviderIcon from "./ProviderIcon.svelte";
+  import { tabLabel } from "./Pane.svelte";
+  import type { Tab } from "./layout";
+
+  async function minMenu(e: MouseEvent, t: Tab) {
+    e.preventDefault();
+    const menu = await Menu.new({
+      items: [
+        { text: "Restore", action: () => restoreTab(t.id) },
+        { text: "Close", action: () => closeTab(t.id) },
+      ],
+    });
+    await menu.popup();
+  }
 
   const s = $derived(git.status);
   const folder = $derived(git.root.slice(git.root.lastIndexOf("/") + 1));
@@ -29,6 +46,17 @@
       <button onclick={publish} title="Publish branch (git push -u origin HEAD)"><CloudUpload size={13} strokeWidth={1.5} />Publish</button>
     {/if}
   {/if}
+  <!-- Minimized terminals: click to put one back where it was -->
+  <span class="spacer"></span>
+  {#each app.minimized as { tab: t } (t.id)}
+    <button class="min" title="Restore {tabLabel(t)}" onclick={() => restoreTab(t.id)} oncontextmenu={(e) => minMenu(e, t)} onauxclick={(e) => e.button === 1 && closeTab(t.id)}>
+      {#if t.kind === "term" && t.agent && agentProvider[t.agent]}
+        <span class="agent" class:working={activity[t.id] === "busy"}><ProviderIcon provider={agentProvider[t.agent]} size={12} /></span>
+      {:else}<SquareTerminal size={12} strokeWidth={1.5} />{/if}
+      <span class="name">{tabLabel(t)}</span>
+      {#if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
+    </button>
+  {/each}
 </footer>
 
 <style>
@@ -63,6 +91,44 @@
   button:hover {
     background: var(--accent);
     color: var(--foreground);
+  }
+  .spacer {
+    flex: 1;
+  }
+  .min {
+    max-width: 180px;
+  }
+  .min .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .agent {
+    display: flex;
+  }
+  .agent.working :global(svg) {
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .agent.working :global(svg) {
+      animation: none;
+    }
+  }
+  .attention {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: oklch(0.7 0.17 50);
+    box-shadow: 0 0 0 2px oklch(0.7 0.17 50 / 25%);
   }
   .op {
     margin-left: 4px;

@@ -1,24 +1,65 @@
+<script module lang="ts">
+  import { app } from "./state.svelte";
+  import { agentProvider } from "./agents.svelte";
+  import { providerName } from "./usageStats";
+  import type { Tab } from "./layout";
+
+  export const tabLabel = (t: Tab) =>
+    t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
+    t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
+    t.name || (t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] : app.titles[t.id] || "Terminal");
+</script>
+
 <script lang="ts">
+  import { Menu } from "@tauri-apps/api/menu";
   import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { app, closeTab, foreignOwner, newNote, newTerminal, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
+  import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
+  import { moveTabTo, ws } from "./workspaces.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
   import Media from "./Media.svelte";
   import { hasPreview, mediaKind } from "./media";
   import ProviderIcon from "./ProviderIcon.svelte";
-  import { activity, agentProvider } from "./agents.svelte";
-  import { providerName } from "./usageStats";
+  import { activity } from "./agents.svelte";
 
   let { pane = $bindable() }: { pane: Pane } = $props();
   const tab = $derived(pane.tabs[pane.active]);
-  const label = (t: Pane["tabs"][number]) =>
-    t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
-    t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
-    t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] :
-    app.titles[t.id] || "Terminal";
+
+  let renaming = $state(""); // tab id with the name input
+  function finishRename(t: Tab, value: string) {
+    if (renaming !== t.id) return; // Enter, then the blur from unmounting
+    renaming = "";
+    if (t.kind === "term") t.name = value.trim() || undefined; // empty = back to the automatic name
+  }
+  const focusInput = (el: HTMLInputElement) => (el.focus(), el.select());
+
+  /** Right-click on a terminal tab. */
+  async function tabMenu(e: MouseEvent, t: Tab) {
+    if (t.kind !== "term") return;
+    e.preventDefault();
+    const sep = { item: "Separator" } as const;
+    const others = ws.all.filter((m) => m.id !== ws.active);
+    const menu = await Menu.new({
+      items: [
+        { text: "Rename…", action: () => (renaming = t.id) },
+        {
+          text: "Move to Workspace",
+          items: [
+            ...others.map((m) => ({ text: m.name, action: () => moveTabTo(t.id, m.id) })),
+            ...(others.length ? [sep] : []),
+            { text: "New Workspace", action: () => moveTabTo(t.id, "") },
+          ],
+        },
+        { text: "Minimize", action: () => minimizeTab(t.id) },
+        sep,
+        { text: "Close", action: () => closeTab(t.id) },
+      ],
+    });
+    await menu.popup();
+  }
 
   // Header above the content: which project / worktree / branch this tab belongs to, and where in it.
   const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
@@ -86,16 +127,32 @@
       <div
         class="tab"
         class:active={i === pane.active}
-        draggable="true"
+        draggable={renaming !== t.id}
         title={t.kind === "term" ? t.cwd : t.path}
         onclick={() => (pane.active = i)}
         onauxclick={(e) => e.button === 1 && closeTab(t.id)}
+        oncontextmenu={(e) => tabMenu(e, t)}
+        ondblclick={() => t.kind === "term" && (renaming = t.id)}
         ondragstart={(e) => (e.dataTransfer?.setData("text/x-tab", t.id), (app.dragging = true))}
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
         {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
-        <span class="name">{label(t)}</span>
+        {#if renaming === t.id}
+          <input
+            class="rename"
+            value={tabLabel(t)}
+            use:focusInput
+            onclick={(e) => e.stopPropagation()}
+            onblur={(e) => finishRename(t, e.currentTarget.value)}
+            onkeydown={(e) => {
+              if (e.key === "Enter") finishRename(t, e.currentTarget.value);
+              else if (e.key === "Escape") renaming = "";
+            }}
+          />
+        {:else}
+          <span class="name">{tabLabel(t)}</span>
+        {/if}
         {#if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
@@ -210,6 +267,15 @@
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .rename {
+    width: 140px;
+    padding: 1px 4px;
+    border: 1px solid var(--gold-ring);
+    border-radius: 4px;
+    background: var(--background);
+    color: var(--foreground);
+    font: inherit;
   }
   .dot {
     width: 6px;

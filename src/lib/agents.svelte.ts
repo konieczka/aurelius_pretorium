@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as L from "./layout";
-import { app } from "./state.svelte";
+import { allTabs, app } from "./state.svelte";
 import type { Provider } from "./usageStats";
 import { agentBusy, TITLED } from "./agentBusy";
 
@@ -34,8 +34,7 @@ function inView(id: string) {
 
 /** The terminal rang its bell or posted a notification. */
 export function ring(id: string) {
-  const f = L.findTab(app.root, id);
-  const t = f?.pane.tabs[f.index];
+  const t = allTabs().find((t) => t.id === id);
   if (t?.kind === "term" && t.agent && !inView(id)) activity[id] = "attention";
 }
 
@@ -49,7 +48,7 @@ async function poll() {
     return;
   }
   const now = Date.now();
-  for (const t of L.panes(app.root).flatMap((p) => p.tabs)) {
+  for (const t of allTabs()) {
     if (t.kind !== "term" || !(t.id in found)) continue; // no shell yet (tab never shown): keep what was saved
     const s = found[t.id];
     const agent = s.agent ?? undefined;
