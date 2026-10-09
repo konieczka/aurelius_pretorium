@@ -7,6 +7,7 @@
   import StatusBar from "$lib/StatusBar.svelte";
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
   import FileTree, { treeMenu } from "$lib/FileTree.svelte";
+  import { hasPreview } from "$lib/media";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
@@ -74,7 +75,7 @@
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
       k === "w" ? () => t && closeTab(t.id) :
       k === "s" ? () => t?.kind === "file" && saveEditor(t.id) :
-      k === "e" ? () => t?.kind === "file" && t.path.endsWith(".md") && (t.preview = !t.preview) :
+      k === "e" ? () => t?.kind === "file" && hasPreview(t.path) && (t.preview = !t.preview) :
       null;
     if (!act) return;
     e.preventDefault();

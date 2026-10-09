@@ -6,6 +6,8 @@
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
+  import Media from "./Media.svelte";
+  import { hasPreview, mediaKind } from "./media";
 
   let { pane = $bindable() }: { pane: Pane } = $props();
   const tab = $derived(pane.tabs[pane.active]);
@@ -82,7 +84,7 @@
       </div>
     {/each}
     <span class="spacer"></span>
-    {#if tab?.kind === "file" && tab.path.endsWith(".md")}
+    {#if tab?.kind === "file" && hasPreview(tab.path)}
       <button class="icon-btn" onclick={() => (tab.preview = !tab.preview)} title={tab.preview ? "Edit (⌘E)" : "Preview (⌘E)"}>
         {#if tab.preview}<Pencil size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
       </button>
@@ -99,6 +101,8 @@
           <Terminal tabId={tab.id} cwd={tab.cwd} />
         {:else if tab.kind === "diff"}
           <Diff path={tab.path} staged={tab.staged} orig={tab.orig} ref={tab.ref} />
+        {:else if mediaKind(tab.path)}
+          <Media path={tab.path} />
         {:else}
           <Editor tabId={tab.id} path={tab.path} preview={!!tab.preview} />
         {/if}
