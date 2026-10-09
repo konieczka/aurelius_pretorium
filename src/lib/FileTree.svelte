@@ -41,10 +41,14 @@
 </script>
 
 <script lang="ts">
-  import { ChevronRight, File, FilePlus, Folder, FolderOpen, FolderPlus } from "@lucide/svelte";
+  import { ChevronRight, FilePlus, FolderPlus } from "@lucide/svelte";
   import FileTree from "./FileTree.svelte";
+  import { git } from "./GitPanel.svelte";
+  import { decoFor } from "./gitStatus";
+  import { fileIcon, folderIcon } from "./fileIcons";
 
   type Entry = { name: string; is_dir: boolean };
+  const markTitle = { M: "Modified", A: "Added", U: "Untracked", R: "Renamed", D: "Deleted", C: "Conflict" };
   let { path, depth = 0 }: { path: string; depth?: number } = $props();
   let entries = $state<Entry[]>([]);
 
@@ -71,6 +75,21 @@
   }
 </script>
 
+{#snippet icon(name: string, isDir: boolean, open = false)}
+  {#if isDir}
+    {@const f = folderIcon(name)}
+    {@const Glyph = open ? f.open : f.glyph}
+    <Glyph size={15} strokeWidth={1.6} style="color: {f.color}" />
+  {:else}
+    {@const i = fileIcon(name)}
+    {#if i.glyph}
+      <i.glyph size={15} strokeWidth={1.6} style="color: {i.color}" />
+    {:else}
+      <span class="badge" class:long={i.badge.length > 2} style:--c={i.color}>{i.badge}</span>
+    {/if}
+  {/if}
+{/snippet}
+
 <div class="level" class:nested={depth > 0}>
   {#if app.creating?.dir === path}
     <div class="row creating">
@@ -93,7 +112,7 @@
     {#if app.renaming === full}
       <div class="row creating active">
         <span class="chev"></span>
-        {#if e.is_dir}<Folder size={14} strokeWidth={1.5} />{:else}<File size={14} strokeWidth={1.5} />{/if}
+        {@render icon(e.name, e.is_dir)}
         <input
           value={e.name}
           {@attach (el) => {
@@ -109,8 +128,11 @@
         />
       </div>
     {:else}
+      {@const d = decoFor(git.deco, git.root, full, e.is_dir)}
       <button
         class="row"
+        class:ignored={d.ignored}
+        data-mark={d.mark}
         class:active={full === app.selectedPath}
         class:cut={app.cut === full}
         class:drop={e.is_dir && app.dropDir === full}
@@ -131,12 +153,10 @@
         <span class="chev" class:open={app.expanded[full]}>
           {#if e.is_dir}<ChevronRight size={12} strokeWidth={1.5} />{/if}
         </span>
-        {#if e.is_dir}
-          {#if app.expanded[full]}<FolderOpen size={14} strokeWidth={1.5} />{:else}<Folder size={14} strokeWidth={1.5} />{/if}
-        {:else}
-          <File size={14} strokeWidth={1.5} />
-        {/if}
+        {@render icon(e.name, e.is_dir, app.expanded[full])}
         <span class="name">{e.name}</span>
+        {#if d.mark && e.is_dir}<span class="git-mark dot" title="Contains changes"></span>
+        {:else if d.mark}<span class="git-mark" title={markTitle[d.mark]}>{d.mark === "C" ? "!" : d.mark}</span>{/if}
       </button>
     {/if}
     {#if e.is_dir && app.expanded[full]}
@@ -149,7 +169,15 @@
   .level.nested {
     margin-left: 13px;
     padding-left: 4px;
-    border-left: 1px solid var(--sidebar-border);
+    border-left: 1px solid transparent;
+    transition: border-color var(--dur-base) var(--ease-standard);
+  }
+  /* Indent guides show while the tree is hovered; the selected entry's guide stays lit. */
+  :global(.tree:hover) .level.nested {
+    border-left-color: color-mix(in oklch, var(--muted-foreground) 22%, transparent);
+  }
+  .level.nested:has(> .row.active) {
+    border-left-color: color-mix(in oklch, var(--gold) 45%, transparent);
   }
   .row {
     position: relative;
@@ -207,6 +235,64 @@
   .row :global(svg) {
     flex: none;
     color: var(--muted-foreground);
+  }
+  .chev :global(svg) {
+    opacity: 0.7;
+  }
+  .badge {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 15px;
+    height: 13px;
+    border-radius: 3px;
+    background: color-mix(in oklch, var(--c) 16%, transparent);
+    color: var(--c);
+    font: 700 7.5px/1 var(--font-sans);
+    letter-spacing: -0.02em;
+  }
+  .badge.long {
+    font-size: 6px;
+    letter-spacing: -0.04em;
+  }
+  /* Git status: VS Code colors — modified amber, new green, conflicts red. */
+  .git-mark {
+    flex: none;
+    width: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--c);
+  }
+  .git-mark.dot::before {
+    content: "";
+    display: block;
+    width: 5px;
+    height: 5px;
+    margin: auto;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.8;
+  }
+  .row[data-mark="M"],
+  .row[data-mark="R"] {
+    --c: var(--syn-number);
+  }
+  .row[data-mark="A"],
+  .row[data-mark="U"] {
+    --c: var(--diff-add-gutter);
+  }
+  .row[data-mark="C"],
+  .row[data-mark="D"] {
+    --c: var(--diff-del-gutter);
+  }
+  .row[data-mark] .name {
+    color: var(--c);
+  }
+  .row.ignored .name,
+  .row.ignored > :global(svg),
+  .row.ignored .badge {
+    opacity: 0.45;
   }
   .chev {
     display: grid;

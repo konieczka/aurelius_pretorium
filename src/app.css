@@ -75,6 +75,22 @@
   --usage-grok: #5272d0;
   --usage-antigravity: #a07a10;
   --usage-opencode: #b04f8f;
+
+  /* File tree icons (fileIcons.ts) */
+  --fi-blue: oklch(0.56 0.15 255);
+  --fi-sky: oklch(0.6 0.12 225);
+  --fi-teal: oklch(0.58 0.1 185);
+  --fi-green: oklch(0.58 0.14 150);
+  --fi-yellow: oklch(0.7 0.15 90);
+  --fi-amber: oklch(0.66 0.15 70);
+  --fi-orange: oklch(0.63 0.18 45);
+  --fi-rust: oklch(0.58 0.14 40);
+  --fi-red: oklch(0.58 0.18 25);
+  --fi-pink: oklch(0.6 0.17 355);
+  --fi-violet: oklch(0.55 0.16 295);
+  --fi-gray: oklch(0.58 0.015 75);
+  --fi-gold: var(--gold);
+  --fi-folder: oklch(0.66 0.11 80);
 }
 
 .dark {
@@ -132,6 +148,20 @@
   --usage-grok: #6481da;
   --usage-antigravity: #b08d1c;
   --usage-opencode: #c0619f;
+
+  --fi-blue: oklch(0.72 0.13 255);
+  --fi-sky: oklch(0.77 0.11 225);
+  --fi-teal: oklch(0.76 0.1 185);
+  --fi-green: oklch(0.76 0.14 150);
+  --fi-yellow: oklch(0.86 0.15 95);
+  --fi-amber: oklch(0.8 0.14 75);
+  --fi-orange: oklch(0.74 0.16 50);
+  --fi-rust: oklch(0.72 0.13 45);
+  --fi-red: oklch(0.7 0.16 25);
+  --fi-pink: oklch(0.74 0.14 355);
+  --fi-violet: oklch(0.73 0.14 295);
+  --fi-gray: oklch(0.68 0.012 78);
+  --fi-folder: oklch(0.8 0.1 82);
 }
 
 html,

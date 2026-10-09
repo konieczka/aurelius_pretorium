@@ -4,11 +4,12 @@
   import { app, foreignOwner, openDiff, openFile, openWorkspace, runInTerminal } from "./state.svelte";
   import * as L from "./layout";
   import { pick, prompt } from "./QuickPick.svelte";
-  import { changes, conflicts, parseStatus, staged, type GitFile, type GitStatus } from "./gitStatus";
+  import { changes, conflicts, emptyDeco, parseStatus, staged, treeDecorations, type GitFile, type GitStatus } from "./gitStatus";
 
   export const git = $state({
     root: "", // repo toplevel ("" = workspace is not in a repo)
     status: null as GitStatus | null,
+    deco: emptyDeco(), // file tree colors / letters / muted ignored entries
     busy: "", // label of the running remote op (pull/push/sync)
     loaded: false,
     op: "" as "" | "merge" | "rebase" | "cherry-pick", // operation in progress (possibly stopped on conflicts)
@@ -36,14 +37,20 @@
     try {
       const [root, gitDir] = (await invoke<string>("git", { cwd: app.workspace, args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"] })).trim().split("\n");
       git.root = root;
-      const raw = await run(["status", "--porcelain=v2", "-z", "--branch"]);
+      const raw = await run(["status", "--porcelain=v2", "-z", "--branch", "--ignored"]);
       git.status = parseStatus(raw);
       await detectOp(gitDir);
-      // Status changed (e.g. an agent edited files): open diffs refetch.
-      if (raw !== lastRaw) (lastRaw = raw), app.gitVersion++;
+      // Status changed (e.g. an agent edited files): open diffs refetch, the tree picks up new files and recolors.
+      if (raw !== lastRaw) {
+        lastRaw = raw;
+        git.deco = treeDecorations(git.status, root);
+        app.gitVersion++;
+        app.treeVersion++;
+      }
     } catch {
       git.root = "";
       git.status = null;
+      if (lastRaw) (lastRaw = ""), (git.deco = emptyDeco());
     }
     git.loaded = true;
     refreshBranches();
