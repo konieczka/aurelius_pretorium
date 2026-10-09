@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Fleet Command",
+  "productName": "Pretorium",
   "version": "0.1.0",
   "identifier": "com.michalkonieczka.fleet_command",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Fleet Command",
+        "title": "Pretorium",
         "width": 1400,
         "height": 900,
         "dragDropEnabled": false

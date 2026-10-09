@@ -597,7 +597,7 @@ pub fn run() {
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
             let item = |id: &str, text: &str, accel: &str| MenuItem::with_id(h, id, text, true, Some(accel));
             Menu::with_items(h, &[
-                &Submenu::with_items(h, "Fleet Command", true, &[
+                &Submenu::with_items(h, "Pretorium", true, &[
                     &P::about(h, None, None)?, &P::separator(h)?, &P::hide(h, None)?, &P::quit(h, None)?,
                 ])?,
                 &Submenu::with_items(h, "Edit", true, &[

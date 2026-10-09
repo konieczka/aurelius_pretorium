@@ -201,7 +201,7 @@ async function mergeInto(target: string) {
 function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }) {
   // Background = the theme's surface (as in Terminal.svelte), so a torn-off window doesn't flash white while loading.
   const backgroundColor = theme.dark ? "#110d07" : "#fff9ee";
-  const w = new WebviewWindow(label, { url: "/", title: "Fleet Command", dragDropEnabled: false, focus: true, backgroundColor, ...opts });
+  const w = new WebviewWindow(label, { url: "/", title: "Pretorium", dragDropEnabled: false, focus: true, backgroundColor, ...opts });
   w.once("tauri://error", (e) => message(`Couldn't open the window: ${JSON.stringify(e.payload)}`, { kind: "error" }));
   return w;
 }

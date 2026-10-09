@@ -163,7 +163,7 @@
 {:else}
   <div class="welcome">
     <span class="mark big"></span>
-    <h1>Fleet Command</h1>
+    <h1>Pretorium</h1>
     <p>An Aurelius workspace</p>
     <button class="open" onclick={pickFolder}><FolderOpen size={16} strokeWidth={1.5} /> Open Folder <kbd>⌘O</kbd></button>
   </div>
