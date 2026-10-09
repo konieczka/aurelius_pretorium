@@ -66,9 +66,8 @@
     if (!e.metaKey) return;
     const t = activeTab();
     const act =
-      k === "=" || k === "+" ? () => zoom(0.1) :
-      k === "-" ? () => zoom(-0.1) :
-      k === "0" ? () => zoom(null) :
+      // ⌘= / ⌘- / ⌘0 are View menu shortcuts; ⌘+ (⇧=) doesn't match the menu's key equivalent.
+      k === "+" ? () => zoom(0.1) :
       k === "o" ? pickFolder :
       k === "p" ? switchFolder :
       !app.workspace ? null :
