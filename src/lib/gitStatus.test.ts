@@ -59,6 +59,6 @@ test("treeDecorations: files, folder summaries, untracked and ignored folders", 
   expect(at("node_modules", true)).toEqual({ mark: undefined, ignored: true });
   expect(at("node_modules/x/index.js").ignored).toBe(true);
   expect(at(".env").ignored).toBe(true);
-  expect(at(".git/HEAD").ignored).toBe(true);
+  expect(at(".git", true).ignored).toBe(false); // only what git reports as ignored
   expect(at(".github", true).ignored).toBe(false);
 });

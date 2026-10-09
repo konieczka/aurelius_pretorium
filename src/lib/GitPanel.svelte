@@ -37,7 +37,7 @@
     try {
       const [root, gitDir] = (await invoke<string>("git", { cwd: app.workspace, args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"] })).trim().split("\n");
       git.root = root;
-      const raw = await run(["status", "--porcelain=v2", "-z", "--branch", "--ignored"]);
+      const raw = await run(["status", "--porcelain=v2", "-z", "--branch", "--ignored=matching"]);
       git.status = parseStatus(raw);
       await detectOp(gitDir);
       // Status changed (e.g. an agent edited files): open diffs refetch, the tree picks up new files and recolors.

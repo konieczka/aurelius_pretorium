@@ -1,4 +1,4 @@
-// Parser for `git status --porcelain=v2 -z --branch [--ignored]`.
+// Parser for `git status --porcelain=v2 -z --branch [--ignored=matching]`.
 
 export type GitFile = {
   path: string; // relative to the repo root
@@ -82,7 +82,7 @@ function within(path: string, root: string, has: (p: string) => boolean) {
 
 /** Decoration for one tree row. A folder without its own mark shows the summary of what's inside. */
 export function decoFor(d: TreeDeco, root: string, path: string, isDir: boolean): { mark?: Mark; ignored: boolean } {
-  const ignored = !!within(path, root, (p) => d.ignored.has(p) || p.endsWith("/.git"));
+  const ignored = !!within(path, root, (p) => d.ignored.has(p));
   const own = within(path, root, (p) => d.marks.get(p) === "U" || p === path && d.marks.has(p));
   const mark = own ? d.marks.get(own) : isDir ? d.dirs.get(path) : undefined;
   return { mark, ignored };
