@@ -14,12 +14,13 @@
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import Usage from "$lib/Usage.svelte";
-  import { closeUsage, toggleUsage, usage } from "$lib/usageView.svelte";
+  import { closeUsage, toggleUsage, usage, warmUsage } from "$lib/usageView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
 
   initWorkspaces();
+  warmUsage();
   $effect(save);
   $effect(watchAgents);
   $effect(() => {

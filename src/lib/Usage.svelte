@@ -8,10 +8,6 @@
   const short: Record<Provider, string> = { claude: "Claude", codex: "Codex", grok: "Grok", antigravity: "Antigravity", opencode: "OpenCode" };
 
   $effect(poll);
-  $effect(() => {
-    usage.days; // reload when the range changes
-    loadStats();
-  });
 
   const s = $derived(usage.rows && summarize(usage.rows, usage.days, usage.now));
   const limitGroups = $derived(
