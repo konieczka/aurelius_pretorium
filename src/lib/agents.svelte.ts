@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import * as L from "./layout";
 import { allTabs, app } from "./state.svelte";
 import type { Provider } from "./usageStats";
-import { agentBusy, TITLED } from "./agentBusy";
 
 // Coding agents running in terminals. A term tab's `agent` is the agent its shell last had in the foreground; it's
 // saved with the layout, so a shell started fresh for the tab (app relaunch, workspace reopened) starts it again.
@@ -10,11 +9,21 @@ import { agentBusy, TITLED } from "./agentBusy";
 /** Agent command (what the backend reports) -> its provider, for the tab's name and icon. */
 export const agentProvider: Record<string, Provider> = { claude: "claude", codex: "codex", agy: "antigravity", grok: "grok", opencode: "opencode" };
 
-const SETTLED = 3000; // output-judged agents: shorter bursts (startup banner) aren't a finished turn
+/** Every shell's state, by tab id, from the backend: it judges busy / attention for all of them, whichever window or
+ * workspace (if any) shows the tab. */
+export type Shell = {
+  agent: string | null;
+  quiet: number | null;
+  title: string;
+  cwd: string;
+  busy: boolean;
+  attention: boolean; // it rang, or finished, while no window had it on screen
+  since: number; // ms since the agent came or went, or started or stopped working (as of `polled`)
+};
+export const shells = $state({ all: {} as Record<string, Shell>, polled: 0 });
 
-/** Transient per-tab state: busy = the agent is working; attention = it rang, or finished while you weren't looking. */
+/** busy = the agent is working; attention = it rang, or finished while you weren't looking. */
 export const activity = $state<Record<string, "busy" | "attention">>({});
-const busySince = new Map<string, number>();
 
 // Tabs whose agent was just typed into a fresh shell: until it shows up (login shells can take a while) or this
 // deadline passes, "no agent" doesn't clear the tab's.
@@ -27,46 +36,30 @@ export function relaunchCommand(t: L.Tab) {
   return t.agent;
 }
 
-/** Is the tab on screen: the active tab of some pane, in a focused window. */
-function inView(id: string) {
-  return document.hasFocus() && L.panes(app.root).some((p) => p.tabs[p.active]?.id === id);
-}
-
-/** The terminal rang its bell or posted a notification. */
-export function ring(id: string) {
-  const t = allTabs().find((t) => t.id === id);
-  if (t?.kind === "term" && t.agent && !inView(id)) activity[id] = "attention";
-}
-
-type Shell = { agent: string | null; quiet: number | null };
+/** Tabs on screen here: the active tab of each pane, if this window has focus. */
+const inView = () => (document.hasFocus() ? L.panes(app.root).flatMap((p) => p.tabs[p.active]?.id ?? []) : []);
 
 async function poll() {
   let found: Record<string, Shell>;
   try {
-    found = await invoke("pty_status");
+    found = await invoke("pty_status", { seen: inView() });
   } catch {
     return;
   }
   const now = Date.now();
+  shells.all = found;
+  shells.polled = now;
+  // Only this workspace's tabs: their agent is saved with the layout (to start it again in a fresh shell).
   for (const t of allTabs()) {
     if (t.kind !== "term" || !(t.id in found)) continue; // no shell yet (tab never shown): keep what was saved
-    const s = found[t.id];
-    const agent = s.agent ?? undefined;
+    const agent = found[t.id].agent ?? undefined;
     if (agent) starting.delete(t.id);
     else if ((starting.get(t.id) ?? 0) > now) continue;
     if (t.agent !== agent) t.agent = agent; // only on change: every write re-saves the layout
-
-    const busy = !!agent && agentBusy(agent, app.titles[t.id] ?? "", s.quiet);
-    if (busy) {
-      if (!busySince.has(t.id)) busySince.set(t.id, now);
-      activity[t.id] = "busy";
-      continue;
-    }
-    const since = busySince.get(t.id);
-    busySince.delete(t.id);
-    const finished = activity[t.id] === "busy" && !!agent && since !== undefined && (TITLED.has(agent) || now - since >= SETTLED);
-    if (finished && !inView(t.id)) activity[t.id] = "attention";
-    else if (activity[t.id] === "busy" || !agent || inView(t.id)) delete activity[t.id];
+  }
+  for (const [id, s] of Object.entries(found)) {
+    const a = s.busy ? "busy" : s.attention ? "attention" : undefined;
+    if (activity[id] !== a) a ? (activity[id] = a) : delete activity[id];
   }
   for (const id of Object.keys(activity)) if (!(id in found)) delete activity[id]; // shell gone
 }
