@@ -6,7 +6,7 @@
   import "@xterm/xterm/css/xterm.css";
   import { app } from "./state.svelte";
   import { theme } from "./theme.svelte";
-  import { relaunchCommand } from "./agents.svelte";
+  import { relaunchCommand, ring } from "./agents.svelte";
   import * as L from "./layout";
 
   // xterm takes hex only: Aurelius tokens converted from oklch (bg = --surface, cursor = --gold).
@@ -89,6 +89,12 @@
     term.onData((data) => e.ready && invoke("pty_write", { id, data }));
     term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }));
     term.onTitleChange((t) => (app.titles[tabId] = t));
+    // Bell, and the notification escapes agents can be set to use (OSC 9 iTerm2, 777 rxvt, 99 kitty). OSC 9 with a
+    // number first is ConEmu's (9;4 = progress), not a notification.
+    term.onBell(() => ring(tabId));
+    term.parser.registerOscHandler(9, (d) => (/^\d+(;|$)/.test(d) || ring(tabId), true));
+    term.parser.registerOscHandler(777, (d) => (d.startsWith("notify;") && ring(tabId), true));
+    term.parser.registerOscHandler(99, () => (ring(tabId), true));
     entries.set(tabId, e);
     return e;
   }

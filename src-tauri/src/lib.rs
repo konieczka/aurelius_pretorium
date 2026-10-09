@@ -2,6 +2,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
@@ -21,7 +22,10 @@ struct Output {
     chan: Option<Channel<InvokeResponseBody>>,
     recent: Vec<u8>,
     exited: bool,
+    input: Option<Instant>,  // last write or resize from the window
+    active: Option<Instant>, // last output that wasn't just answering that (echo, redraw)
 }
+const ECHO: std::time::Duration = std::time::Duration::from_millis(300);
 const KEEP: usize = 512 * 1024; // ponytail: raw byte tail, not a parsed screen; replays the last ~512KB of output
 
 /// Shells keyed by terminal tab id: they outlive the window that started them (reloads, workspaces moved between windows).
@@ -149,6 +153,10 @@ fn pty_open(
                 break;
             }
             let mut o = sink.lock().unwrap();
+            let now = Instant::now();
+            if o.input.is_none_or(|t| now - t > ECHO) {
+                o.active = Some(now);
+            }
             o.recent.extend_from_slice(&buf[..n]);
             if o.recent.len() > KEEP {
                 // Cut at a line start so the replay doesn't begin mid escape sequence.
@@ -178,6 +186,7 @@ fn pty_open(
 fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let mut map = ptys.sessions.lock().unwrap();
     let s = map.get_mut(&id).ok_or("no such pty")?;
+    s.out.lock().unwrap().input = Some(Instant::now());
     s.writer.write_all(data.as_bytes()).map_err(err)
 }
 
@@ -185,6 +194,7 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
 fn pty_resize(ptys: State<Ptys>, id: String, cols: u16, rows: u16) -> Res<()> {
     let map = ptys.sessions.lock().unwrap();
     let s = map.get(&id).ok_or("no such pty")?;
+    s.out.lock().unwrap().input = Some(Instant::now());
     s.master
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(err)
@@ -215,14 +225,20 @@ fn agent_in(args: &str) -> Option<&'static str> {
     })
 }
 
-/// Which agent each shell has in the foreground: tab id -> agent command, or None when the shell itself is (or the
-/// job isn't an agent). Only tabs with a shell are listed. Polled by the windows.
+#[derive(serde::Serialize)]
+struct Shell {
+    agent: Option<String>, // agent command in the foreground; None when it's the shell itself or another job
+    quiet: Option<u64>,    // ms since its last output that wasn't an echo of input (None: none yet)
+}
+
+/// What each shell is doing, by tab id. Only tabs with a shell are listed. Polled by the windows.
 #[tauri::command]
-async fn pty_agents(ptys: State<'_, Ptys>) -> Res<HashMap<String, Option<String>>> {
-    let mut agents: HashMap<String, Option<String>> = HashMap::new();
+async fn pty_status(ptys: State<'_, Ptys>) -> Res<HashMap<String, Shell>> {
+    let mut shells: HashMap<String, Shell> = HashMap::new();
     let mut jobs: Vec<(String, i32)> = Vec::new(); // tab id, foreground process group (other than the shell)
     for (id, s) in ptys.sessions.lock().unwrap().iter() {
-        agents.insert(id.clone(), None);
+        let quiet = s.out.lock().unwrap().active.map(|t| t.elapsed().as_millis() as u64);
+        shells.insert(id.clone(), Shell { agent: None, quiet });
         #[cfg(unix)]
         if let Some(pg) = s.master.process_group_leader() {
             if s.child.process_id() != Some(pg as u32) {
@@ -231,7 +247,7 @@ async fn pty_agents(ptys: State<'_, Ptys>) -> Res<HashMap<String, Option<String>
         }
     }
     if jobs.is_empty() {
-        return Ok(agents);
+        return Ok(shells);
     }
     let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pgid=,args="]).output())
         .await
@@ -242,10 +258,10 @@ async fn pty_agents(ptys: State<'_, Ptys>) -> Res<HashMap<String, Option<String>
         let Some((pg, args)) = line.trim_start().split_once(' ') else { continue };
         let Some(agent) = agent_in(args) else { continue };
         for (id, _) in jobs.iter().filter(|(_, j)| pg.parse() == Ok(*j)) {
-            agents.insert(id.clone(), Some(agent.to_string()));
+            shells.get_mut(id).unwrap().agent = Some(agent.to_string());
         }
     }
-    Ok(agents)
+    Ok(shells)
 }
 
 /// Is the left mouse button physically held right now (regardless of which window has the events)?
@@ -585,7 +601,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_agents, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

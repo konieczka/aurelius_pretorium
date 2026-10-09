@@ -9,7 +9,7 @@
   import Media from "./Media.svelte";
   import { hasPreview, mediaKind } from "./media";
   import ProviderIcon from "./ProviderIcon.svelte";
-  import { agentProvider } from "./agents.svelte";
+  import { activity, agentProvider } from "./agents.svelte";
   import { providerName } from "./usageStats";
 
   let { pane = $bindable() }: { pane: Pane } = $props();
@@ -83,6 +83,7 @@
         {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<ProviderIcon provider={agentProvider[t.agent]} size={13} />{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
         {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
+        {#if activity[t.id] === "busy"}<span class="working" title="Working"></span>{:else if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
       </div>
@@ -201,6 +202,34 @@
     height: 6px;
     border-radius: 9999px;
     background: var(--gold);
+  }
+  /* Agent state: a turning ring while it works, an ember dot when it's done or asking while you were elsewhere */
+  .working {
+    width: 8px;
+    height: 8px;
+    border: 1.5px solid var(--gold-soft);
+    border-top-color: var(--gold);
+    border-radius: 9999px;
+    animation: turn 0.9s linear infinite;
+  }
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .attention {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: oklch(0.7 0.17 50);
+    box-shadow: 0 0 0 2px oklch(0.7 0.17 50 / 25%);
+  }
+  /* The global reduced-motion rule shortens animations to 1ms, which would make an infinite one strobe */
+  @media (prefers-reduced-motion: reduce) {
+    .working {
+      animation: none;
+      border-color: var(--gold);
+    }
   }
   .spacer {
     flex: 1;
