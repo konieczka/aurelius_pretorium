@@ -11,6 +11,8 @@
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
+  import Usage from "$lib/Usage.svelte";
+  import { closeUsage, toggleUsage, usage } from "$lib/usageView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
@@ -65,7 +67,8 @@
       k === "e" && e.shiftKey ? () => (app.sidebar = "files") :
       k === "g" && e.shiftKey ? () => (app.sidebar = "git") :
       k === "b" && !e.shiftKey ? toggleSidebar :
-      !app.workspace ? null :
+      k === "u" && e.shiftKey ? toggleUsage :
+      k === "w" && usage.open ? closeUsage :
       k === "t" ? newTerminal :
       k === "n" ? newNote :
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
@@ -139,7 +142,9 @@
         <div class="tree"><GitPanel /></div>
       {/if}
     </aside>
-    <main onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    <!-- The Usage view stands in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{/if}
     <StatusBar />
   </div>
   <QuickPick />
@@ -282,6 +287,9 @@
   main {
     position: relative;
     min-width: 0;
+  }
+  main.away {
+    display: none;
   }
   .welcome {
     position: relative;
