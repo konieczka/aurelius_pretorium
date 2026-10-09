@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { changes, conflicts, parseStatus, staged } from "./gitStatus";
+import { changes, conflicts, decoFor, parseStatus, staged, treeDecorations } from "./gitStatus";
 
 // Real output (records joined by NUL), plus upstream/ab and a conflict record.
 const out = [
@@ -29,4 +29,36 @@ test("parseStatus: branch, records, groups", () => {
 test("parseStatus: fresh repo", () => {
   const s = parseStatus("# branch.oid (initial)\0# branch.head main\0");
   expect([s.oid, s.head, s.files.length, s.upstream]).toEqual(["(initial)", "main", 0, undefined]);
+});
+
+test("treeDecorations: files, folder summaries, untracked and ignored folders", () => {
+  const s = parseStatus(
+    [
+      "1 .M N... 100644 100644 100644 a b src/lib/a.ts",
+      "1 A. N... 000000 100644 100644 0 b src/lib/b.ts",
+      "1 .D N... 100644 100644 000000 a a src/gone.ts",
+      "u UU N... 100644 100644 100644 100644 a b c docs/x.md",
+      "? new/",
+      "? src/c.ts",
+      "! node_modules/",
+      "! .env",
+      "",
+    ].join("\0"),
+  );
+  expect(s.ignored).toEqual(["node_modules/", ".env"]);
+  const d = treeDecorations(s, "/r");
+  const at = (p: string, dir = false) => decoFor(d, "/r", `/r/${p}`, dir);
+  expect(at("src/lib/a.ts")).toEqual({ mark: "M", ignored: false });
+  expect(at("src/lib/b.ts").mark).toBe("A");
+  expect(at("src/lib/other.ts").mark).toBeUndefined();
+  expect(at("src/lib", true).mark).toBe("M"); // M beats A
+  expect(at("src", true).mark).toBe("M"); // a deletion inside
+  expect(at("docs", true).mark).toBe("C");
+  expect(at("new", true).mark).toBe("U");
+  expect(at("new/deep/file.txt").mark).toBe("U");
+  expect(at("node_modules", true)).toEqual({ mark: undefined, ignored: true });
+  expect(at("node_modules/x/index.js").ignored).toBe(true);
+  expect(at(".env").ignored).toBe(true);
+  expect(at(".git/HEAD").ignored).toBe(true);
+  expect(at(".github", true).ignored).toBe(false);
 });
