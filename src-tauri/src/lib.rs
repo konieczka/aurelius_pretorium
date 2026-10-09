@@ -577,13 +577,25 @@ fn stay_awake(on: Option<bool>, awake: State<Awake>, app: AppHandle) -> Res<bool
     Ok(child.is_some())
 }
 
+/// Reload bypassing the cache (WKWebView's reloadFromOrigin); plain reload elsewhere.
+fn force_reload(w: &tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    let _ = w.with_webview(|wv| unsafe {
+        let wv = &*(wv.inner() as *const objc2::runtime::AnyObject);
+        let _: *mut objc2::runtime::AnyObject = objc2::msg_send![wv, reloadFromOrigin: std::ptr::null::<objc2::runtime::AnyObject>()];
+    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = w.reload();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // Default macOS menu binds ⌘W to Close Window; we want it for tabs.
         .menu(|h| {
-            use tauri::menu::{Menu, PredefinedMenuItem as P, Submenu};
+            use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
+            let item = |id: &str, text: &str, accel: &str| MenuItem::with_id(h, id, text, true, Some(accel));
             Menu::with_items(h, &[
                 &Submenu::with_items(h, "Fleet Command", true, &[
                     &P::about(h, None, None)?, &P::separator(h)?, &P::hide(h, None)?, &P::quit(h, None)?,
@@ -592,8 +604,22 @@ pub fn run() {
                     &P::undo(h, None)?, &P::redo(h, None)?, &P::separator(h)?,
                     &P::cut(h, None)?, &P::copy(h, None)?, &P::paste(h, None)?, &P::select_all(h, None)?,
                 ])?,
+                &Submenu::with_items(h, "View", true, &[
+                    &item("reload", "Reload", "CmdOrCtrl+R")?, &item("force-reload", "Force Reload", "CmdOrCtrl+Shift+R")?, &P::separator(h)?,
+                    &item("zoom-reset", "Actual Size", "CmdOrCtrl+0")?, &item("zoom-in", "Zoom In", "CmdOrCtrl+=")?, &item("zoom-out", "Zoom Out", "CmdOrCtrl+-")?,
+                ])?,
                 &Submenu::with_items(h, "Window", true, &[&P::minimize(h, None)?, &P::fullscreen(h, None)?])?,
             ])
+        })
+        .on_menu_event(|h, e| {
+            let Some(w) = h.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) else { return };
+            match e.id().as_ref() {
+                "reload" => { let _ = w.reload(); }
+                "force-reload" => force_reload(&w),
+                // Zoom level lives in the frontend (persisted, and read back for drag math).
+                id @ ("zoom-in" | "zoom-out" | "zoom-reset") => { let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), "zoom", id); }
+                _ => {}
+            }
         })
         .setup(|app| {
             let h = app.handle().clone();

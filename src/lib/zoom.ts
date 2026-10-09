@@ -1,4 +1,5 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 // Native webview zoom (like VS Code's): scales everything, and xterm/CodeMirror re-measure on their own.
 let level = 1;
@@ -19,3 +20,8 @@ export function zoom(delta: number | null) {
 }
 
 zoom(0); // restore saved level on startup
+
+// View menu (⌘= / ⌘- / ⌘0), sent to the focused window only.
+getCurrentWebviewWindow()
+  .listen<string>("zoom", ({ payload }) => zoom(payload === "zoom-in" ? 0.1 : payload === "zoom-out" ? -0.1 : null))
+  .catch(() => {});
