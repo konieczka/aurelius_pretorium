@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Flame, Gauge, Monitor, Moon, PanelLeft, Plus, Sparkles, Sun, X } from "@lucide/svelte";
+  import { Flame, Gauge, Monitor, Moon, PanelLeft, Plus, Brain, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
@@ -145,7 +145,7 @@
     aria-label="Skills"
     aria-pressed={skills.open}
   >
-    <Sparkles size={14} strokeWidth={1.5} />
+    <Brain size={14} strokeWidth={1.5} />
   </button>
   <button
     class="icon-btn view"
