@@ -11,7 +11,7 @@
 </script>
 
 <script lang="ts">
-  import { Menu } from "@tauri-apps/api/menu";
+  import { popupMenu, sep } from "./contextMenu";
   import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
@@ -40,25 +40,21 @@
   async function tabMenu(e: MouseEvent, t: Tab) {
     if (t.kind !== "term") return;
     e.preventDefault();
-    const sep = { item: "Separator" } as const;
     const others = ws.all.filter((m) => m.id !== ws.active);
-    const menu = await Menu.new({
-      items: [
-        { text: "Rename…", action: () => (renaming = t.id) },
-        {
-          text: "Move to Workspace",
-          items: [
-            ...others.map((m) => ({ text: m.name, action: () => moveTabTo(t.id, m.id) })),
-            ...(others.length ? [sep] : []),
-            { text: "New Workspace", action: () => moveTabTo(t.id, "") },
-          ],
-        },
-        { text: "Minimize", action: () => minimizeTab(t.id) },
-        sep,
-        { text: "Close", action: () => closeTab(t.id) },
-      ],
-    });
-    await menu.popup();
+    await popupMenu([
+      { text: "Rename…", action: () => (renaming = t.id) },
+      {
+        text: "Move to Workspace",
+        items: [
+          ...others.map((m) => ({ text: m.name, action: () => moveTabTo(t.id, m.id) })),
+          ...(others.length ? [sep] : []),
+          { text: "New Workspace", action: () => moveTabTo(t.id, "") },
+        ],
+      },
+      { text: "Minimize", action: () => minimizeTab(t.id) },
+      sep,
+      { text: "Close", action: () => closeTab(t.id) },
+    ]);
   }
 
   // Header above the content: which project / worktree / branch this tab belongs to, and where in it.

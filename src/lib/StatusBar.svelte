@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowDown, ArrowUp, CloudUpload, FolderGit2, GitBranch, LoaderCircle, RefreshCw, SquareTerminal } from "@lucide/svelte";
-  import { Menu } from "@tauri-apps/api/menu";
+  import { popupMenu } from "./contextMenu";
   import { branchName, git, noHead, publish, switchBranch, switchWorktree, sync } from "./GitPanel.svelte";
   import { app, closeTab, restoreTab } from "./state.svelte";
   import { activity, agentProvider } from "./agents.svelte";
@@ -10,13 +10,10 @@
 
   async function minMenu(e: MouseEvent, t: Tab) {
     e.preventDefault();
-    const menu = await Menu.new({
-      items: [
-        { text: "Restore", action: () => restoreTab(t.id) },
-        { text: "Close", action: () => closeTab(t.id) },
-      ],
-    });
-    await menu.popup();
+    await popupMenu([
+      { text: "Restore", action: () => restoreTab(t.id) },
+      { text: "Close", action: () => closeTab(t.id) },
+    ]);
   }
 
   const s = $derived(git.status);
