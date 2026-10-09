@@ -27,7 +27,7 @@ export const app = $state({
   workspace: "", // folder shown in the sidebar; new terminals start here
   root: L.rootWith(L.pane()),
   recent: load<string[]>("recent", []), // opened folders, most recent first
-  branches: {} as Record<string, string>, // folder -> current branch, for tabs outside the workspace
+  repos: {} as Record<string, Repo>, // folder -> its git checkout, for the header above each tab
   focused: "", // pane id
   dirty: {} as Record<string, boolean>, // tab id -> unsaved
   titles: {} as Record<string, string>, // tab id -> terminal title
@@ -51,10 +51,30 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + "/"
 /** The opened folder a path belongs to (deepest match), or its parent dir if none. */
 export const ownerOf = (path: string) =>
   app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? path.slice(0, path.lastIndexOf("/"));
+const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.path);
+/** Folder a tab belongs to ("" for an unsaved note). */
+export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t)) : "");
 /** Folder a tab belongs to, or "" when it's in the current workspace. */
 export function foreignOwner(t: L.Tab) {
-  const p = t.kind === "term" ? t.cwd : t.path;
+  const p = tabPath(t);
   return !p || under(p, app.workspace) ? "" : ownerOf(p);
+}
+
+/** root = toplevel; main = the main checkout's toplevel when this is a linked worktree. "" root = not a repo. */
+export type Repo = { root: string; branch: string; main: string };
+/** Look up `folder`'s checkout; agents may switch branches at any time, so GitPanel calls this on every poll. */
+export async function refreshRepo(folder: string) {
+  const git = (args: string[]) => invoke<string>("git", { cwd: folder, args }).then((o) => o.trim());
+  try {
+    const [[root, gitDir, common], branch] = await Promise.all([
+      git(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"]).then((o) => o.split("\n")),
+      git(["branch", "--show-current"]).then((b) => b || git(["rev-parse", "--short", "HEAD"])).catch(() => ""),
+    ]);
+    const main = gitDir === common ? "" : common.replace(/\/\.git\/?$/, "");
+    app.repos[folder] = { root, branch, main };
+  } catch {
+    app.repos[folder] = { root: "", branch: "", main: "" };
+  }
 }
 
 export function focusedPane(): L.Pane {

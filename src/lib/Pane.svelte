@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Columns2, Eye, GitCompare, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
+  import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { app, closeTab, foreignOwner, newNote, newTerminal, splitFocused } from "./state.svelte";
+  import { app, closeTab, foreignOwner, newNote, newTerminal, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
@@ -19,11 +19,25 @@
     t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
     t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] :
     app.titles[t.id] || "Terminal";
-  /** "folder · branch" for tabs that belong to another folder than the one in the sidebar. */
-  const hint = (t: Pane["tabs"][number]) => {
-    const o = foreignOwner(t);
-    return o && [o.slice(o.lastIndexOf("/") + 1), app.branches[o]].filter(Boolean).join(" · ");
-  };
+
+  // Header above the content: which project / worktree / branch this tab belongs to, and where in it.
+  const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+  const owner = $derived(tab ? tabOwner(tab) : "");
+  const repo = $derived(app.repos[owner]);
+  $effect(() => {
+    if (owner && !(owner in app.repos)) refreshRepo(owner); // new folder: don't wait for the next git poll
+  });
+  const where = $derived.by(() => {
+    if (!tab || !owner) return null;
+    const root = repo?.root || owner;
+    const project = base(repo?.main || root);
+    // Worktrees made here are named <main>-<branch>; the prefix just repeats the project
+    const wt = !repo?.main ? "" : base(root).startsWith(project + "-") ? base(root).slice(project.length + 1) : base(root);
+    const full = tab.kind === "term" ? tab.cwd : tab.path;
+    const rel = full.startsWith(root + "/") ? full.slice(root.length + 1) : full === root ? "" : full;
+    const branch = repo?.branch ?? "";
+    return { project, wt: wt && wt === branch ? "worktree" : wt, branch, git: !!repo?.root, rel: tab.kind === "term" ? rel : rel.slice(0, rel.lastIndexOf("/") + 1), foreign: !!foreignOwner(tab) };
+  });
 
   function drop(ev: DragEvent, index: number) {
     const id = ev.dataTransfer?.getData("text/x-tab");
@@ -73,7 +87,7 @@
         class="tab"
         class:active={i === pane.active}
         draggable="true"
-        title={(t.kind === "term" ? t.cwd : t.path) + (app.branches[foreignOwner(t)] ? ` (${app.branches[foreignOwner(t)]})` : "")}
+        title={t.kind === "term" ? t.cwd : t.path}
         onclick={() => (pane.active = i)}
         onauxclick={(e) => e.button === 1 && closeTab(t.id)}
         ondragstart={(e) => (e.dataTransfer?.setData("text/x-tab", t.id), (app.dragging = true))}
@@ -82,7 +96,6 @@
       >
         {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         <span class="name">{label(t)}</span>
-        {#if hint(t)}<span class="hint">{hint(t)}</span>{/if}
         {#if activity[t.id] === "attention"}<span class="attention" title="Needs your attention"></span>{/if}
         {#if app.dirty[t.id]}<span class="dot" title="Unsaved"></span>{/if}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
@@ -99,6 +112,14 @@
     <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)"><Rows2 size={14} strokeWidth={1.5} /></button>
   </div>
+  {#if where}
+    <div class="where" class:foreign={where.foreign} title={(tab.kind === "term" ? tab.cwd : tab.path) + (where.foreign ? "\nNot the folder in the sidebar" : "")}>
+      <span class="seg project">{#if where.git}<FolderGit2 size={12} strokeWidth={1.5} />{:else}<Folder size={12} strokeWidth={1.5} />{/if}{where.project}</span>
+      {#if where.wt}<span class="seg" title="Worktree: {repo?.root}"><GitFork size={12} strokeWidth={1.5} />{where.wt}</span>{/if}
+      {#if where.branch}<span class="seg" title="Branch"><GitBranch size={12} strokeWidth={1.5} />{where.branch}</span>{/if}
+      {#if where.rel}<span class="rel">{where.rel}</span>{/if}
+    </div>
+  {/if}
   <div class="body">
     {#if tab}
       {#key tab.id}
@@ -190,13 +211,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .hint {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
-    color: var(--muted-foreground);
-  }
   .dot {
     width: 6px;
     height: 6px;
@@ -284,6 +298,40 @@
   .tab:hover .x,
   .tab.active .x {
     visibility: visible;
+  }
+  .where {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 24px;
+    flex: none;
+    padding: 0 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .seg {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: none;
+  }
+  .project {
+    color: var(--foreground);
+    font-weight: 500;
+  }
+  /* Tab from another folder than the sidebar's: the project name carries the warning colour */
+  .foreign .project {
+    color: oklch(0.7 0.17 50);
+  }
+  .rel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .body {
     position: relative;
