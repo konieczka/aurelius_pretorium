@@ -4,7 +4,9 @@ import { emitTo } from "@tauri-apps/api/event";
 import { getAllWebviewWindows, getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
-import { app, dispose, load, openWorkspace, store, tabOwner } from "./state.svelte";
+import { activate as activateTab, allTabs, app, dispose, load, openWorkspace, restoreTab, store, tabOwner } from "./state.svelte";
+import { focusTerm } from "./Terminal.svelte";
+import { closeFleet } from "./fleetView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
 import { theme } from "./theme.svelte";
 
@@ -67,6 +69,32 @@ export function activate(id: string) {
   if (l.folder) openWorkspace(l.folder); // also seeds a terminal into an empty layout
   else app.workspace = "";
   win.setTitle(nameOf(id));
+}
+
+/** Every tab of workspace `id`, minimized ones included, wherever its layout is: shown or held here, or in storage
+ * (another window's, which saves it on every change, or a closed one's). */
+export function tabsIn(id: string): L.Tab[] {
+  if (id === ws.active) return allTabs();
+  const l = held.get(id) ?? load<Layout | null>("ws:" + id, null);
+  return l ? tabsOf(l) : [];
+}
+
+/** Bring up tab `tabId` of workspace `id`: in the window that has the workspace open, else here. */
+export async function showTab(id: string, tabId: string) {
+  const other = ownerWindow(id);
+  if (other) {
+    await emitTo(other, "show-tab", { id, tab: tabId });
+    return (await Window.getByLabel(other))?.setFocus();
+  }
+  activate(id);
+  reveal(tabId);
+}
+
+function reveal(tabId: string) {
+  closeFleet();
+  if (app.minimized.some((m) => m.tab.id === tabId)) restoreTab(tabId);
+  else activateTab(tabId);
+  setTimeout(() => focusTerm(tabId)); // a terminal that was already its pane's active one doesn't remount (and focus)
 }
 
 /** Open `id` here, or bring up the window that already has it. */
@@ -292,6 +320,12 @@ export function initWorkspaces() {
       const l = load<Layout | null>("ws:" + payload.id, null);
       if (l) addTo(l, payload.tab), store.set("ws:" + payload.id, JSON.stringify(l));
     }
+  });
+  // The Fleet view in another window jumps to one of our tabs.
+  getCurrentWebviewWindow().listen<{ id: string; tab: string }>("show-tab", ({ payload }) => {
+    if (!ws.open.includes(payload.id)) return;
+    activate(payload.id);
+    reveal(payload.tab);
   });
   const merge = store.get("merge:" + win.label);
   if (merge) mergeInto(merge);

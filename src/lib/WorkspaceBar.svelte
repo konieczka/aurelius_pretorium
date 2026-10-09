@@ -1,21 +1,36 @@
 <script lang="ts">
-  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, SlidersHorizontal, Sun, X } from "@lucide/svelte";
+  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Radar, SlidersHorizontal, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
   import { agents, toggleAgents } from "./agentsView.svelte";
+  import { fleet, toggleFleet } from "./fleetView.svelte";
+  import { activity, shells } from "./agents.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
   import { zoomLevel } from "./zoom";
   import {
-    activate, closeWorkspace, createWorkspace, deleteWorkspace, moveWorkspace, tearOut, nameOf, openHere, openInNewWindow, ownerWindow, renameWorkspace, ws,
+    activate, closeWorkspace, createWorkspace, deleteWorkspace, moveWorkspace, tearOut, nameOf, openHere, openInNewWindow, ownerWindow, renameWorkspace, tabsIn, ws,
   } from "./workspaces.svelte";
 
   let editing = $state(""); // workspace id being renamed
   const ThemeIcon = $derived({ light: Sun, dark: Moon, system: Monitor }[theme.mode]);
+
+  // Background workspaces' agents: a dot on their tab while one needs you, or works. Re-read every poll: tabs move
+  // between workspaces without telling us.
+  const wsActivity = $derived.by(() => {
+    void shells.polled;
+    return Object.fromEntries(
+      ws.open.map((id) => {
+        const a = tabsIn(id).map((t) => activity[t.id]);
+        return [id, a.includes("attention") ? "attention" : a.includes("busy") ? "busy" : ""];
+      }),
+    );
+  });
+  const waiting = $derived(Object.values(activity).filter((a) => a === "attention").length);
 
   async function menu(id: string) {
     const v = await pick(nameOf(id), [
@@ -137,6 +152,8 @@
       {:else}
         <span class="name">{nameOf(id)}</span>
       {/if}
+      {#if id !== ws.active && wsActivity[id] === "attention"}<span class="attention" title="An agent here needs your attention"></span>
+      {:else if id !== ws.active && wsActivity[id] === "busy"}<span class="working" title="Agents working"></span>{/if}
       {#if ws.open.length > 1}
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeWorkspace(id))} aria-label="Close workspace"><X size={12} strokeWidth={1.5} /></button>
       {/if}
@@ -146,6 +163,17 @@
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
   <button class="icon-btn arrange" onclick={arrangePanes} title="Auto-arrange panes" aria-label="Auto-arrange panes">
     <LayoutGrid size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view fleet"
+    class:on={fleet.open}
+    onclick={toggleFleet}
+    title="Fleet: every agent, in every workspace (⇧⌘J){waiting ? ` · ${waiting} need${waiting === 1 ? 's' : ''} you` : ''}"
+    aria-label="Fleet"
+    aria-pressed={fleet.open}
+  >
+    <Radar size={14} strokeWidth={1.5} />
+    {#if waiting}<span class="badge">{waiting}</span>{/if}
   </button>
   <button
     class="icon-btn view"
@@ -310,6 +338,57 @@
     background: var(--background);
     color: var(--foreground);
     font: inherit;
+  }
+  /* Same marks as the pane tabs: an ember dot when an agent needs you; a gold one breathing while they work */
+  .attention,
+  .working {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+  }
+  .attention {
+    background: oklch(0.7 0.17 50);
+    box-shadow: 0 0 0 2px oklch(0.7 0.17 50 / 25%);
+  }
+  .working {
+    background: var(--gold);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .working {
+      animation: none;
+    }
+  }
+  .fleet {
+    position: relative;
+  }
+  .badge {
+    position: absolute;
+    top: 1px;
+    right: -2px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    border-radius: 9999px;
+    background: oklch(0.7 0.17 50);
+    color: oklch(0.2 0.02 50);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 13px;
+    text-align: center;
   }
   .x {
     opacity: 0;

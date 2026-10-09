@@ -1,0 +1,47 @@
+import { expect, test } from "bun:test";
+import { cleanTitle, fleetRows, fmtSpan } from "./fleet";
+import type { Shell } from "./agents.svelte";
+import type { Tab } from "./layout";
+
+const term = (id: string, more: Partial<Tab & { kind: "term" }> = {}): Tab => ({ id, kind: "term", cwd: "/p", ...more });
+const shell = (more: Partial<Shell>): Shell => ({ agent: "claude", quiet: null, title: "", cwd: "/p", busy: false, attention: false, since: 0, ...more });
+
+test("one row per agent, most urgent first", () => {
+  const rows = fleetRows(
+    [
+      { id: "w1", tabs: [term("idle"), term("plain"), term("busy"), { id: "f", kind: "file", path: "/p/a" }] },
+      { id: "w2", tabs: [term("asleep", { agent: "codex" }), term("waiting", { name: "Mine" })] },
+    ],
+    {
+      idle: shell({ title: "✳ Fix the bug", since: 5000 }),
+      plain: shell({ agent: null }),
+      busy: shell({ busy: true, title: "⠐ Refactor", since: 100 }),
+      waiting: shell({ attention: true, title: "✳ Ignored" }),
+      lost: shell({ agent: "grok", cwd: "/q", since: 9 }),
+    },
+  );
+  expect(rows.map((r) => [r.id, r.status, r.ws, r.label])).toEqual([
+    ["waiting", "attention", "w2", "Mine"],
+    ["busy", "busy", "w1", "Refactor"],
+    ["lost", "idle", null, ""],
+    ["idle", "idle", "w1", "Fix the bug"],
+    ["asleep", "asleep", "w2", ""],
+  ]);
+  expect(rows.find((r) => r.id === "asleep")?.agent).toBe("codex");
+});
+
+test("a shell whose agent quit drops the saved one", () => {
+  expect(fleetRows([{ id: "w", tabs: [term("t", { agent: "claude" })] }], { t: shell({ agent: null }) })).toEqual([]);
+});
+
+test("titles lose the status glyph", () => {
+  expect(cleanTitle("⠐ Fix it")).toBe("Fix it");
+  expect(cleanTitle("✳ Claude Code")).toBe("Claude Code");
+  expect(cleanTitle("- Responding - grok")).toBe("Responding - grok");
+  expect(cleanTitle("◐ ")).toBe("");
+  expect(cleanTitle("⠦ fleet_command", "/dev/fleet_command")).toBe("");
+});
+
+test("spans", () => {
+  expect([fmtSpan(4200), fmtSpan(125_000), fmtSpan(3 * 3600_000 + 5), fmtSpan(50 * 3600_000)]).toEqual(["4s", "2m", "3h", "2d"]);
+});

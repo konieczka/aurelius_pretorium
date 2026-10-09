@@ -6,9 +6,10 @@ import { disposeEditor } from "./Editor.svelte";
 import { hasPreview } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
+import { closeFleet } from "./fleetView.svelte";
 
-/** Opening a tab brings the panes back from the Usage or Skills view. */
-const closeViews = () => (closeUsage(), closeSkills());
+/** Opening a tab brings the panes back from the Usage, Skills or Fleet view. */
+const closeViews = () => (closeUsage(), closeSkills(), closeFleet());
 
 // localStorage is shared by all windows of the app.
 export const store = {

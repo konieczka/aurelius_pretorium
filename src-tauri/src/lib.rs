@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
 mod agent_config;
 mod skills;
+mod status;
 mod usage;
 
 struct Session {
@@ -16,6 +17,8 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     out: Arc<Mutex<Output>>,
+    cwd: String, // where it started
+    watch: status::Watch,
 }
 
 /// Where a shell's output goes, plus its recent output so a window that (re)attaches can replay it.
@@ -26,6 +29,7 @@ struct Output {
     exited: bool,
     input: Option<Instant>,  // last write or resize from the window
     active: Option<Instant>, // last output that wasn't just answering that (echo, redraw)
+    signals: status::Signals,
 }
 const ECHO: std::time::Duration = std::time::Duration::from_millis(300);
 const KEEP: usize = 512 * 1024; // ponytail: raw byte tail, not a parsed screen; replays the last ~512KB of output
@@ -138,7 +142,7 @@ fn pty_open(
     }
     cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     cmd.arg("-l");
-    cmd.cwd(cwd);
+    cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     let child = pair.slave.spawn_command(cmd).map_err(err)?;
@@ -159,6 +163,7 @@ fn pty_open(
             if o.input.is_none_or(|t| now - t > ECHO) {
                 o.active = Some(now);
             }
+            o.signals.feed(&buf[..n]);
             o.recent.extend_from_slice(&buf[..n]);
             if o.recent.len() > KEEP {
                 // Cut at a line start so the replay doesn't begin mid escape sequence.
@@ -180,7 +185,7 @@ fn pty_open(
         }
     });
 
-    sessions.insert(id, Session { writer, master: pair.master, child, out });
+    sessions.insert(id, Session { writer, master: pair.master, child, out, cwd, watch: Default::default() });
     Ok(true)
 }
 
@@ -231,37 +236,61 @@ fn agent_in(args: &str) -> Option<&'static str> {
 struct Shell {
     agent: Option<String>, // agent command in the foreground; None when it's the shell itself or another job
     quiet: Option<u64>,    // ms since its last output that wasn't an echo of input (None: none yet)
+    title: String,
+    cwd: String, // where the shell started
+    busy: bool,
+    attention: bool, // the agent rang, or finished, while no window had it on screen
+    since: u64,      // ms since the agent came or went, or started or stopped working
 }
 
-/// What each shell is doing, by tab id. Only tabs with a shell are listed. Polled by the windows.
+/// What each shell is doing, by tab id. Only tabs with a shell are listed. Polled by every window, each passing the
+/// tabs it has on screen (`seen`): what's in view in some window doesn't need attention.
 #[tauri::command]
-async fn pty_status(ptys: State<'_, Ptys>) -> Res<HashMap<String, Shell>> {
-    let mut shells: HashMap<String, Shell> = HashMap::new();
+async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<String, Shell>> {
     let mut jobs: Vec<(String, i32)> = Vec::new(); // tab id, foreground process group (other than the shell)
+    #[cfg(unix)]
     for (id, s) in ptys.sessions.lock().unwrap().iter() {
-        let quiet = s.out.lock().unwrap().active.map(|t| t.elapsed().as_millis() as u64);
-        shells.insert(id.clone(), Shell { agent: None, quiet });
-        #[cfg(unix)]
         if let Some(pg) = s.master.process_group_leader() {
             if s.child.process_id() != Some(pg as u32) {
                 jobs.push((id.clone(), pg));
             }
         }
     }
-    if jobs.is_empty() {
-        return Ok(shells);
-    }
-    let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pgid=,args="]).output())
-        .await
-        .map_err(err)?
-        .map_err(err)?;
-    // Any process in the job counts: the agent may be a child of a wrapper.
-    for line in String::from_utf8_lossy(&ps.stdout).lines() {
-        let Some((pg, args)) = line.trim_start().split_once(' ') else { continue };
-        let Some(agent) = agent_in(args) else { continue };
-        for (id, _) in jobs.iter().filter(|(_, j)| pg.parse() == Ok(*j)) {
-            shells.get_mut(id).unwrap().agent = Some(agent.to_string());
+    let mut agents: HashMap<String, &'static str> = HashMap::new();
+    if !jobs.is_empty() {
+        let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pgid=,args="]).output())
+            .await
+            .map_err(err)?
+            .map_err(err)?;
+        // Any process in the job counts: the agent may be a child of a wrapper.
+        for line in String::from_utf8_lossy(&ps.stdout).lines() {
+            let Some((pg, args)) = line.trim_start().split_once(' ') else { continue };
+            let Some(agent) = agent_in(args) else { continue };
+            for (id, _) in jobs.iter().filter(|(_, j)| pg.parse() == Ok(*j)) {
+                agents.insert(id.clone(), agent);
+            }
         }
+    }
+    let now = Instant::now();
+    let mut shells = HashMap::new();
+    for (id, s) in ptys.sessions.lock().unwrap().iter_mut() {
+        if seen.contains(id) {
+            s.watch.seen(now);
+        }
+        let mut o = s.out.lock().unwrap();
+        let quiet = o.active.map(|t| now.saturating_duration_since(t).as_millis() as u64);
+        let rang = std::mem::take(&mut o.signals.rang);
+        let agent = agents.get(id).copied();
+        let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang);
+        shells.insert(id.clone(), Shell {
+            agent: agent.map(String::from),
+            quiet,
+            title: o.signals.title.clone(),
+            cwd: s.cwd.clone(),
+            busy,
+            attention: s.watch.attention,
+            since: now.saturating_duration_since(s.watch.changed).as_millis() as u64,
+        });
     }
     Ok(shells)
 }
