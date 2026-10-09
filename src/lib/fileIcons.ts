@@ -4,7 +4,7 @@ import {
   Atom, Braces, CodeXml, Container, Database, File, FileArchive, FileCog, FileText, Film, Folder, FolderArchive,
   FolderCheck, FolderCode, FolderCog, FolderGit2, FolderKey, FolderOpen, FolderOutput, FolderPen, FolderRoot, FolderTree,
   GitBranch, Hammer, Hash, Image, Info, KeyRound, Lock, Music, Package, Scale, ScrollText, Settings, Sheet, Sparkles,
-  SquareTerminal, Type, Zap, FolderHeart, FolderKanban, FolderInput, Sigma,
+  SquareTerminal, Type, Zap, FolderHeart, FolderKanban, FolderInput, Sigma, Box,
 } from "@lucide/svelte";
 
 type Glyph = typeof File;
@@ -44,6 +44,7 @@ const byExt: Record<string, FileIcon> = {
   icns: g(Image, "violet"), svg: g(Image, "amber"), heic: g(Image, "violet"),
   mp4: g(Film, "pink"), mov: g(Film, "pink"), webm: g(Film, "pink"), mkv: g(Film, "pink"),
   mp3: g(Music, "pink"), wav: g(Music, "pink"), ogg: g(Music, "pink"), flac: g(Music, "pink"), m4a: g(Music, "pink"),
+  glb: g(Box, "teal"), gltf: g(Box, "teal"), obj: g(Box, "gray"), fbx: g(Box, "gray"), usdz: g(Box, "sky"),
   ttf: g(Type, "red"), otf: g(Type, "red"), woff: g(Type, "red"), woff2: g(Type, "red"),
   zip: g(FileArchive, "amber"), tar: g(FileArchive, "amber"), gz: g(FileArchive, "amber"), tgz: g(FileArchive, "amber"),
   "7z": g(FileArchive, "amber"), rar: g(FileArchive, "amber"), dmg: g(FileArchive, "gray"), xz: g(FileArchive, "amber"),

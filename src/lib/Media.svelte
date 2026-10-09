@@ -3,6 +3,7 @@
   import { FileWarning, Grid2x2, Maximize, Minus, Moon, Music, Plus, Sun } from "@lucide/svelte";
   import { app } from "./state.svelte";
   import { isSvg, mediaKind } from "./media";
+  import Model from "./Model.svelte";
 
   // `src` overrides the file (the SVG preview renders the editor's text, unsaved edits included).
   let { path, src: given }: { path: string; src?: string } = $props();
@@ -81,6 +82,8 @@
         {#if !given}<span class="dims">{nat.w} × {nat.h}</span>{/if}
       </div>
     {/if}
+  {:else if kind === "model"}
+    <Model {path} />
   {:else if kind === "video"}
     <div class="stage">
       <!-- svelte-ignore a11y_media_has_caption -->
