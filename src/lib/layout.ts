@@ -112,3 +112,17 @@ export function movePath(root: Split, from: string, to: string) {
     for (const t of p.tabs)
       if (t.kind === "file" && (t.path === from || t.path.startsWith(from + "/"))) t.path = to + t.path.slice(from.length);
 }
+
+/** Panes side by side along `dir` in the widest stretch of `n` (its columns for "row", rows for "col"). */
+function span(n: LNode, dir: "row" | "col"): number {
+  if (n.type === "pane") return 1;
+  const s = n.children.map((c) => span(c, dir));
+  return n.dir === dir ? s.reduce((a, b) => a + b, 0) : Math.max(...s);
+}
+
+/** Auto-arrange: size every split so panes share width and height evenly, like a grid. */
+export function equalize(n: LNode) {
+  if (n.type === "pane") return;
+  n.sizes = n.children.map((c) => span(c, n.dir));
+  n.children.forEach(equalize);
+}

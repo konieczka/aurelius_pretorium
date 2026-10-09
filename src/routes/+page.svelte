@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, PanelLeftClose, RefreshCw } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
@@ -96,8 +96,6 @@
         <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">
           <FolderRoot size={14} strokeWidth={1.5} /><span class="name">{app.workspace.split("/").pop()}</span><ChevronsUpDown size={13} strokeWidth={1.5} />
         </button>
-        <span class="spacer"></span>
-        <button class="icon-btn" onclick={toggleSidebar} title="Hide sidebar (⌘B)" aria-label="Hide sidebar"><PanelLeftClose size={14} strokeWidth={1.5} /></button>
       </header>
       <div class="toolbar">
         <div class="modes" role="tablist">

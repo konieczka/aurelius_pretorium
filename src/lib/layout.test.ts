@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { closeTab, dockTab, movePath, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
+import { closeTab, dockTab, equalize, movePath, moveTab, pane, panes, rootWith, split, type Tab } from "./layout";
 
 const t = (id: string): Tab => ({ id, kind: "term", cwd: "/" });
 
@@ -57,4 +57,22 @@ test("movePath re-points tabs inside a moved folder only", () => {
   const root = rootWith(a);
   movePath(root, "/w/src", "/w/old/src");
   expect(a.tabs.map((x) => ("path" in x ? x.path : x.cwd))).toEqual(["/w/old/src/a.ts", "/w/old/src/lib/b.ts", "/w/srcx/c.ts", "/"]);
+});
+
+test("equalize gives panes an even share of each axis", () => {
+  const a = pane([t("a")]);
+  const root = rootWith(a);
+  const b = split(root, a.id, "row", t("b"));
+  const c = split(root, b.id, "row", t("c"));
+  split(root, c.id, "col", t("d")); // [a | b | (c / d)]
+  root.sizes = [5, 1, 2];
+  equalize(root);
+  expect(root.sizes).toEqual([1, 1, 1]);
+  expect((root.children[2] as { sizes: number[] }).sizes).toEqual([1, 1]);
+
+  split(root, a.id, "col", t("e"));
+  const ae = root.children[0];
+  split(root, (ae as { children: { id: string }[] }).children[1].id, "row", t("f")); // [(a / (e | f)) | b | (c / d)]
+  equalize(root);
+  expect(root.sizes).toEqual([2, 1, 1]); // e and f each get a column's width, like b
 });
