@@ -14,7 +14,7 @@
   import { findTab } from "./layout";
 
   // Editors outlive their component so unsaved edits survive tab moves.
-  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment };
+  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment; wrap?: Compartment };
   const entries = new Map<string, Entry>();
 
   export function disposeEditor(tabId: string) {
@@ -112,7 +112,7 @@
 
   export const languageFor = (path: string) => LanguageDescription.matchFilename(languages, path)?.load();
 
-  function create(tabId: string, path: string): Entry {
+  function create(tabId: string, path: string, wrap: boolean): Entry {
     const e: Entry = { host: document.createElement("div") };
     e.host.className = "editor-host selectable"; // code, or the read error
     entries.set(tabId, e);
@@ -121,6 +121,7 @@
     (draft !== undefined ? Promise.resolve(draft) : !path ? Promise.resolve("") : invoke<string>("read_file", { path })).then(
       (doc) => {
         const lang = (e.lang = new Compartment());
+        const wrapping = (e.wrap = new Compartment());
         e.view = new EditorView({
           doc,
           parent: e.host,
@@ -128,6 +129,7 @@
             basicSetup,
             aurelius,
             lang.of([]),
+            wrapping.of(wrap ? EditorView.lineWrapping : []),
             conflictMarkers,
             keymap.of([
               { key: "F7", run: (v) => goToConflict(v, 1) > 0 },
@@ -162,14 +164,20 @@
   import { git, markResolved } from "./GitPanel.svelte";
   import Media from "./Media.svelte";
   import { isSvg } from "./media";
-  let { tabId, path, preview }: { tabId: string; path: string; preview: boolean } = $props();
+  let { tabId, path, preview, wrap }: { tabId: string; path: string; preview: boolean; wrap: boolean } = $props();
   let el: HTMLDivElement;
 
   $effect(() => {
     // untrack: a moved file changes `path`, which must not re-run this (and steal focus).
-    const e = entries.get(tabId) ?? create(tabId, untrack(() => path));
+    const e = entries.get(tabId) ?? create(tabId, untrack(() => path), untrack(() => wrap));
     el.appendChild(e.host);
     if (!preview) e.view?.focus();
+  });
+
+  $effect(() => {
+    const on = wrap;
+    const e = entries.get(tabId);
+    e?.view?.dispatch({ effects: e.wrap!.reconfigure(on ? EditorView.lineWrapping : []) });
   });
 
   $effect(() => {

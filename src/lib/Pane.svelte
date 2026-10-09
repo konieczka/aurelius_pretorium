@@ -12,7 +12,7 @@
 
 <script lang="ts">
   import { Menu } from "@tauri-apps/api/menu";
-  import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, X } from "@lucide/svelte";
+  import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, TextWrap, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
   import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
@@ -175,6 +175,9 @@
       {#if where.wt}<span class="seg" title="Worktree: {repo?.root}"><GitFork size={12} strokeWidth={1.5} />{where.wt}</span>{/if}
       {#if where.branch}<span class="seg" title="Branch"><GitBranch size={12} strokeWidth={1.5} />{where.branch}</span>{/if}
       {#if where.rel}<span class="rel">{where.rel}</span>{/if}
+      {#if tab.kind === "file" && !mediaKind(tab.path) && !tab.preview}
+        <button class="icon-btn wrap" class:on={tab.wrap !== false} onclick={() => (tab.wrap = tab.wrap === false)} title={tab.wrap !== false ? "Don't wrap lines" : "Wrap lines"} aria-pressed={tab.wrap !== false}><TextWrap size={13} strokeWidth={1.5} /></button>
+      {/if}
     </div>
   {/if}
   <div class="body">
@@ -187,7 +190,7 @@
         {:else if mediaKind(tab.path)}
           <Media path={tab.path} />
         {:else}
-          <Editor tabId={tab.id} path={tab.path} preview={!!tab.preview} />
+          <Editor tabId={tab.id} path={tab.path} preview={!!tab.preview} wrap={tab.wrap !== false} />
         {/if}
       {/key}
     {:else}
@@ -378,6 +381,15 @@
     font-size: 11.5px;
     white-space: nowrap;
     overflow: hidden;
+  }
+  .wrap {
+    width: 20px;
+    height: 20px;
+    margin-left: auto;
+    flex: none;
+  }
+  .wrap.on {
+    color: var(--gold);
   }
   .seg {
     display: flex;
