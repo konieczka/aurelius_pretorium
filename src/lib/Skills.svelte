@@ -1,11 +1,12 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { ask, message } from "@tauri-apps/plugin-dialog";
-  import { FileText, FolderOpen, Link2, Plus, RefreshCw, Search, Trash2, TriangleAlert, Unlink, X } from "@lucide/svelte";
+  import { Link2, Plus, RefreshCw, Search, Trash2, TriangleAlert, Unlink, X } from "@lucide/svelte";
   import ProviderIcon from "./ProviderIcon.svelte";
-  import { app, openFile } from "./state.svelte";
+  import SkillDoc from "./SkillDoc.svelte";
+  import { app } from "./state.svelte";
   import { closeSkills, loadSkills, skills } from "./skillsView.svelte";
-  import { agentsOf, clashes, listNames, lostWithout, matches, shortPath, validName, type Place, type Scope, type Skill } from "./skills";
+  import { accessPlan, agentsOf, clashes, listNames, lostWithout, matches, shortPath, validName, type Place, type Scope, type Skill } from "./skills";
   import { PROVIDERS, providerName, type Provider } from "./usageStats";
 
   const reload = () => loadSkills(app.workspace);
@@ -61,6 +62,25 @@
     await run(() => invoke("skill_delete", { project: app.workspace, paths: [p.path] }));
   }
 
+  /** Link `k` from the folders `agents` read (a folder also reaches the other agents reading it). */
+  async function give(k: Skill, agents: Provider[]) {
+    const dirs = accessPlan(k, agents, locations).map((l) => l.dir);
+    if (dirs.length) await run(() => invoke("skill_link", { project: app.workspace, dir: k.dir, dirs }));
+  }
+  /** "Link from ~/.claude/skills (Grok Build and OpenCode read it too)" */
+  function giveTitle(k: Skill, a: Provider) {
+    const l = accessPlan(k, [a], locations)[0];
+    const also = l.agents.filter((x) => x !== a && !k.agents.includes(x));
+    return `Link it from ${short(l.dir)}` + (also.length ? ` (${names(also)} read it too)` : "");
+  }
+
+  // The inline SKILL.md and ⌘S/⌘E follow the selected skill.
+  $effect(() => {
+    const k = !skills.creating && selected?.file ? selected : null;
+    const cur = k && { file: k.file, readOnly: k.readOnly };
+    if (cur?.file !== skills.current?.file || cur?.readOnly !== skills.current?.readOnly) skills.current = cur;
+  });
+
   // Add form
   let name = $state("");
   let description = $state("");
@@ -86,7 +106,7 @@
       skills.creating = null;
       await reload();
       skills.selected = file.slice(0, file.lastIndexOf("/"));
-      openFile(file); // a fresh skill is all template: on to writing it
+      skills.mode = "edit"; // a fresh skill is all template: on to writing it
     } catch (err) {
       formError = String(err);
     }
@@ -146,6 +166,7 @@
                   <span class="row-top">
                     <span class="name">{k.name}</span>
                     {#if k.places.some((p) => p.link)}<span class="faint" title="Linked into more than one folder"><Link2 size={12} strokeWidth={1.75} /></span>{/if}
+                    {#if skills.drafts[k.file] !== undefined}<span class="unsaved" title="Unsaved changes"></span>{/if}
                     {#if flagged(k)}<span class="warn-icon" title="Has problems"><TriangleAlert size={12} strokeWidth={2} /></span>{/if}
                     <span class="icons">{#each k.agents as a (a)}<ProviderIcon provider={a} size={12} />{/each}</span>
                   </span>
@@ -158,142 +179,151 @@
           {/each}
         </nav>
 
-        <section class="detail">
-          {#if skills.creating}
-            {@const c = skills.creating}
-            <form onsubmit={create}>
-              <h2 class="form-title">New skill</h2>
-              <div class="seg wide" role="tablist" aria-label="Scope">
-                <button type="button" role="tab" aria-selected={c.scope === "project"} class:on={c.scope === "project"} onclick={() => setScope("project")}>Project · {folder}</button>
-                <button type="button" role="tab" aria-selected={c.scope === "global"} class:on={c.scope === "global"} onclick={() => setScope("global")}>Global</button>
-              </div>
-              <p class="hint">{c.scope === "project" ? `Only in ${folder}; you can commit it with the project.` : "In every project on this Mac."}</p>
+        <div class="detail-scroll">
+          <section class="detail">
+            {#if skills.creating}
+              {@const c = skills.creating}
+              <form onsubmit={create}>
+                <h2 class="form-title">New skill</h2>
+                <div class="seg wide" role="tablist" aria-label="Scope">
+                  <button type="button" role="tab" aria-selected={c.scope === "project"} class:on={c.scope === "project"} onclick={() => setScope("project")}>Project · {folder}</button>
+                  <button type="button" role="tab" aria-selected={c.scope === "global"} class:on={c.scope === "global"} onclick={() => setScope("global")}>Global</button>
+                </div>
+                <p class="hint">{c.scope === "project" ? `Only in ${folder}; you can commit it with the project.` : "In every project on this Mac."}</p>
 
-              <label class="field">
-                <span>Name</span>
-                <!-- svelte-ignore a11y_autofocus -->
-                <input
-                  value={name}
-                  oninput={(e) => (name = e.currentTarget.value.toLowerCase().replace(/[\s_]+/g, "-"))}
-                  placeholder="git-commit"
-                  spellcheck="false"
-                  autofocus
-                />
-                {#if nameError}<span class="field-error">{nameError}</span>{/if}
-              </label>
-              <label class="field">
-                <span>Description</span>
-                <textarea bind:value={description} rows="3" placeholder="What it does and when to use it, e.g. “Write commit messages in our format. Use when committing.”"></textarea>
-                <span class="hint">Agents decide when to load a skill from this.</span>
-              </label>
+                <label class="field">
+                  <span>Name</span>
+                  <!-- svelte-ignore a11y_autofocus -->
+                  <input
+                    value={name}
+                    oninput={(e) => (name = e.currentTarget.value.toLowerCase().replace(/[\s_]+/g, "-"))}
+                    placeholder="git-commit"
+                    spellcheck="false"
+                    autofocus
+                  />
+                  {#if nameError}<span class="field-error">{nameError}</span>{/if}
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea bind:value={description} rows="3" placeholder="What it does and when to use it, e.g. “Write commit messages in our format. Use when committing.”"></textarea>
+                  <span class="hint">Agents decide when to load a skill from this.</span>
+                </label>
 
-              <fieldset>
-                <legend>Who sees it</legend>
-                {#if shared}
-                  <label class="target" class:on={c.dir === null}>
-                    <input type="radio" name="target" checked={c.dir === null} onchange={() => (c.dir = null)} />
-                    <span class="target-text">
-                      <b>All agents</b>
-                      <span class="hint">Saved in {short(shared.dir)}, linked from {shared.links.map(short).join(" and ")}</span>
-                    </span>
-                    <span class="icons">{#each agentsOf([shared.dir, ...shared.links], locations) as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
-                  </label>
-                {/if}
-                {#each targets as l (l.dir)}
-                  <label class="target" class:on={c.dir === l.dir}>
-                    <input type="radio" name="target" checked={c.dir === l.dir} onchange={() => (c.dir = l.dir)} />
-                    <span class="target-text">
-                      <span class="path">{short(l.dir)}</span>
-                      <span class="hint">{names(l.agents)}</span>
-                    </span>
-                    <span class="icons">{#each l.agents as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
-                  </label>
-                {/each}
-              </fieldset>
-
-              {#if formError}<div class="warn"><TriangleAlert size={13} strokeWidth={2} />{formError}</div>{/if}
-              <div class="actions">
-                <button class="btn primary" type="submit" disabled={!validName(name)}>Create and edit</button>
-                <button class="btn" type="button" onclick={() => (skills.creating = null)}>Cancel</button>
-              </div>
-            </form>
-          {:else if selected}
-            {@const k = selected}
-            <div class="title">
-              <h2>{k.name}</h2>
-              <span class="tag">{scopeLabel(k)}</span>
-            </div>
-            {#if k.description}<p class="desc selectable">{k.description}</p>{/if}
-
-            {#each k.problems as p}
-              <div class="warn"><TriangleAlert size={13} strokeWidth={2} /><span>{p}</span></div>
-            {/each}
-            {#each clashes(k, all) as c (c.other.dir)}
-              <div class="warn">
-                <TriangleAlert size={13} strokeWidth={2} />
-                <span>Same name as the {scopeLabel(c.other).toLowerCase()} skill in {short(c.other.dir)}: {names(c.agents)} load only one of them.</span>
-              </div>
-            {/each}
-
-            <h3>Used by</h3>
-            <div class="agents">
-              {#each k.agents as a (a)}<span class="agent"><ProviderIcon provider={a} />{providerName[a]}</span>{/each}
-            </div>
-
-            <h3>Folders</h3>
-            <ul class="places">
-              {#each k.places as p (p.path)}
-                <li>
-                  <span class="path selectable" title={p.path}>{short(p.path)}</span>
-                  {#if p.link}<span class="tag small"><Link2 size={11} strokeWidth={1.75} />link</span>{/if}
-                  <span class="icons">{#each agentsOf([p.location], locations) as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
-                  {#if p.link && p.scope !== "managed" && k.places.length > 1}
-                    <button class="icon-btn" onclick={() => unlink(k, p)} title="Remove this link" aria-label="Remove link in {short(p.location)}"><Unlink size={13} strokeWidth={1.5} /></button>
+                <fieldset>
+                  <legend>Who sees it</legend>
+                  {#if shared}
+                    <label class="target" class:on={c.dir === null}>
+                      <input type="radio" name="target" checked={c.dir === null} onchange={() => (c.dir = null)} />
+                      <span class="target-text">
+                        <b>All agents</b>
+                        <span class="hint">Saved in {short(shared.dir)}, linked from {shared.links.map(short).join(" and ")}</span>
+                      </span>
+                      <span class="icons">{#each agentsOf([shared.dir, ...shared.links], locations) as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
+                    </label>
                   {/if}
-                </li>
+                  {#each targets as l (l.dir)}
+                    <label class="target" class:on={c.dir === l.dir}>
+                      <input type="radio" name="target" checked={c.dir === l.dir} onchange={() => (c.dir = l.dir)} />
+                      <span class="target-text">
+                        <span class="path">{short(l.dir)}</span>
+                        <span class="hint">{names(l.agents)}</span>
+                      </span>
+                      <span class="icons">{#each l.agents as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
+                    </label>
+                  {/each}
+                </fieldset>
+
+                {#if formError}<div class="warn"><TriangleAlert size={13} strokeWidth={2} />{formError}</div>{/if}
+                <div class="actions">
+                  <button class="btn primary" type="submit" disabled={!validName(name)}>Create and edit</button>
+                  <button class="btn" type="button" onclick={() => (skills.creating = null)}>Cancel</button>
+                </div>
+              </form>
+            {:else if selected}
+              {@const k = selected}
+              <div class="title">
+                <h2>{k.name}</h2>
+                <span class="tag">{scopeLabel(k)}</span>
+                {#if !k.readOnly}
+                  <button class="btn danger" onclick={() => remove(k)} title="Delete this skill"><Trash2 size={13} strokeWidth={1.5} />Delete</button>
+                {/if}
+              </div>
+              {#if k.description}<p class="desc selectable">{k.description}</p>{/if}
+
+              {#each k.problems as p}
+                <div class="warn"><TriangleAlert size={13} strokeWidth={2} /><span>{p}</span></div>
               {/each}
-            </ul>
-            {#if k.places.every((p) => p.link) && k.file}<p class="note">Links to {short(k.dir)}</p>{/if}
+              {#each clashes(k, all) as c (c.other.dir)}
+                <div class="warn">
+                  <TriangleAlert size={13} strokeWidth={2} />
+                  <span>Same name as the {scopeLabel(c.other).toLowerCase()} skill in {short(c.other.dir)}: {names(c.agents)} load only one of them.</span>
+                </div>
+              {/each}
 
-            {#if k.file}
-              <h3>Files</h3>
-              <ul class="files">
-                <li>SKILL.md</li>
-                {#each k.files as f}<li>{f}</li>{/each}
+              {@const missing = k.file ? PROVIDERS.filter((a) => !k.agents.includes(a) && accessPlan(k, [a], locations).length) : []}
+              <h3>Used by</h3>
+              <div class="agents">
+                {#each k.agents as a (a)}<span class="agent"><ProviderIcon provider={a} />{providerName[a]}</span>{/each}
+                {#each missing as a (a)}
+                  <button class="agent add" onclick={() => give(k, [a])} title={giveTitle(k, a)}><Plus size={12} strokeWidth={2} /><ProviderIcon provider={a} />{providerName[a]}</button>
+                {/each}
+                {#if missing.length > 1}
+                  <button class="link-btn" onclick={() => give(k, missing)}>Give all agents access</button>
+                {/if}
+              </div>
+
+              <h3>Folders</h3>
+              <ul class="places">
+                {#each k.places as p (p.path)}
+                  <li>
+                    <span class="path selectable" title={p.path}>{short(p.path)}</span>
+                    {#if p.link}<span class="tag small"><Link2 size={11} strokeWidth={1.75} />link</span>{/if}
+                    <span class="icons">{#each agentsOf([p.location], locations) as a (a)}<ProviderIcon provider={a} size={13} />{/each}</span>
+                    {#if p.link && p.scope !== "managed" && k.places.length > 1}
+                      <button class="icon-btn" onclick={() => unlink(k, p)} title="Remove this link" aria-label="Remove link in {short(p.location)}"><Unlink size={13} strokeWidth={1.5} /></button>
+                    {/if}
+                  </li>
+                {/each}
               </ul>
-            {/if}
+              {#if k.places.every((p) => p.link) && k.file}<p class="note">Links to {short(k.dir)}</p>{/if}
 
-            <div class="actions">
-              <button class="btn primary" disabled={!k.file} onclick={() => openFile(k.file)}><FileText size={14} strokeWidth={1.5} />{k.readOnly ? "View" : "Edit"} SKILL.md</button>
-              <button class="btn" onclick={() => invoke("reveal_path", { path: k.file || k.dir }).catch((e) => message(String(e), { kind: "error" }))}>
-                <FolderOpen size={14} strokeWidth={1.5} />Reveal in Finder
-              </button>
-              {#if !k.readOnly}
-                <button class="btn danger" onclick={() => remove(k)}><Trash2 size={14} strokeWidth={1.5} />Delete</button>
+              {#if k.files.length}
+                <h3>Also in the folder</h3>
+                <ul class="files">
+                  {#each k.files as f}<li>{f}</li>{/each}
+                </ul>
               {/if}
-            </div>
-            {#if k.readOnly}<p class="note">{managedLabel(k)}: managed by {names(k.agents)}, which may overwrite changes.</p>{/if}
-          {:else}
-            <p class="muted">{all.length ? "No skills match." : "No skills yet. Add one with New skill."}</p>
-          {/if}
-        </section>
+
+              {#if k.readOnly}<p class="note">{managedLabel(k)}: managed by {names(k.agents)}, which may overwrite changes.</p>{/if}
+              {#if k.file}{#key k.file}<SkillDoc file={k.file} readOnly={k.readOnly} />{/key}{/if}
+            {:else}
+              <p class="muted">{all.length ? "No skills match." : "No skills yet. Add one with New skill."}</p>
+            {/if}
+          </section>
+        </div>
       </div>
     {/if}
   </div>
 </div>
 
 <style>
+  /* Header fixed; the list and the selected skill scroll on their own */
   .skills {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
-    overflow: auto;
+    min-height: 0;
+    overflow: hidden;
     background: var(--background);
   }
   .page {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    height: 100%;
     max-width: 1120px;
     margin: 0 auto;
-    padding: 28px 32px 48px;
+    padding: 28px 32px 0;
   }
   header {
     display: flex;
@@ -393,10 +423,18 @@
     font-size: 13px;
   }
   .body {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     gap: 24px;
-    align-items: start;
+  }
+  .list,
+  .detail-scroll {
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: 32px;
   }
   h2 {
     display: flex;
@@ -461,6 +499,13 @@
     display: inline-flex;
     color: var(--muted-foreground);
   }
+  .unsaved {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--gold);
+  }
   .warn-icon {
     display: inline-flex;
     color: var(--destructive);
@@ -471,8 +516,6 @@
     font-size: 12.5px;
   }
   .detail {
-    position: sticky;
-    top: 0;
     padding: 18px 20px 20px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -551,6 +594,31 @@
     border-radius: 9999px;
     background: var(--muted);
     font-size: 12.5px;
+  }
+  .agent.add {
+    gap: 5px;
+    border: 1px dashed var(--border-strong);
+    background: none;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .agent.add:hover {
+    border-color: var(--gold-ring);
+    background: var(--gold-soft);
+    color: var(--foreground);
+  }
+  .link-btn {
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .link-btn:hover {
+    color: var(--foreground);
   }
   ul {
     margin: 0;
@@ -724,12 +792,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  @media (max-width: 860px) {
-    .body {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .detail {
-      position: static;
-    }
+  .title .btn {
+    height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
   }
 </style>

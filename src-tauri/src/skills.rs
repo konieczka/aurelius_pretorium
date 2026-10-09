@@ -353,11 +353,45 @@ fn create(home: &Path, project: &Path, scope: Scope, dir: Option<&Path>, name: &
     std::fs::create_dir(&skill).map_err(err)?;
     std::fs::write(skill.join("SKILL.md"), template(name, description)).map_err(err)?;
     for d in &links {
-        std::fs::create_dir_all(d).map_err(err)?;
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(relative(d, &skill), d.join(name)).map_err(err)?;
+        symlink_into(d, &skill)?;
     }
     Ok(s(&skill.join("SKILL.md")))
+}
+
+/// A relative link to `skill` from the skills folder `dir`, under the skill's folder name.
+fn symlink_into(dir: &Path, skill: &Path) -> Res<()> {
+    std::fs::create_dir_all(dir).map_err(err)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(relative(dir, skill), dir.join(skill.file_name().ok_or("no folder name")?)).map_err(err)?;
+    Ok(())
+}
+
+fn editable(home: &Path, project: &Path) -> Vec<PathBuf> {
+    locations(home, project).into_iter().filter(|l| l.scope != Scope::Managed).map(|l| l.dir).collect()
+}
+
+fn link(home: &Path, project: &Path, skill: &Path, dirs: &[String]) -> Res<()> {
+    if !skill.join("SKILL.md").is_file() {
+        return Err(format!("{} isn't a skill", skill.display()));
+    }
+    let name = skill.file_name().ok_or("no folder name")?;
+    let editable = editable(home, project);
+    // Every target must be a skills folder and free before anything is linked.
+    for d in dirs.iter().map(Path::new) {
+        if !editable.iter().any(|e| e == d) {
+            return Err(format!("{} isn't a skills folder", d.display()));
+        }
+        if std::fs::symlink_metadata(d.join(name)).is_ok() {
+            return Err(format!("{} already exists", d.join(name).display()));
+        }
+    }
+    dirs.iter().try_for_each(|d| symlink_into(Path::new(d), skill))
+}
+
+/// Give more agents a skill: link its folder `dir` from the skills folders `dirs` they read.
+#[tauri::command]
+pub fn skill_link(project: String, dir: String, dirs: Vec<String>) -> Res<()> {
+    link(&home(), Path::new(&project), Path::new(&dir), &dirs)
 }
 
 /// New skill `name` in the skills folder `dir`, or with no `dir` in the shared folder of `scope` plus links from
@@ -368,7 +402,7 @@ pub fn skill_create(project: String, scope: Scope, dir: Option<String>, name: St
 }
 
 fn delete(home: &Path, project: &Path, paths: &[String]) -> Res<()> {
-    let editable: Vec<PathBuf> = locations(home, project).into_iter().filter(|l| l.scope != Scope::Managed).map(|l| l.dir).collect();
+    let editable = editable(home, project);
     for p in paths {
         let p = Path::new(p);
         if !p.parent().is_some_and(|d| editable.iter().any(|e| e == d)) {
@@ -487,6 +521,10 @@ mod tests {
         std::fs::remove_dir_all(&b).unwrap();
     }
 
+    fn link_path(dir: &str) -> PathBuf {
+        Path::new(dir).join("git-commit")
+    }
+
     #[test]
     fn creates_for_all_agents_and_deletes() {
         let b = base("create");
@@ -512,10 +550,19 @@ mod tests {
 
         // Deleting unlinks links and refuses paths outside skills folders.
         assert!(delete(&home, &proj, &[s(&proj.join("src/x"))]).is_err());
-        let link = s(&home.join(".gemini/config/skills/git-commit"));
-        delete(&home, &proj, &[link.clone()]).unwrap();
-        assert!(std::fs::symlink_metadata(&link).is_err());
+        let gone = s(&home.join(".gemini/config/skills/git-commit"));
+        delete(&home, &proj, &[gone.clone()]).unwrap();
+        assert!(std::fs::symlink_metadata(&gone).is_err());
         assert!(home.join(".agents/skills/git-commit/SKILL.md").exists());
+
+        // Giving access back: a relative link from the folder Antigravity reads.
+        let gemini = s(&home.join(".gemini/config/skills"));
+        let skill = home.join(".agents/skills/git-commit");
+        link(&home, &proj, &skill, &[gemini.clone()]).unwrap();
+        assert_eq!(std::fs::read_link(&link_path(&gemini)).unwrap(), PathBuf::from("../../../.agents/skills/git-commit"));
+        assert!(link(&home, &proj, &skill, &[gemini]).unwrap_err().contains("already exists"));
+        assert!(link(&home, &proj, &skill, &[s(&proj.join("src"))]).is_err());
+        assert!(link(&home, &proj, &proj.join("nope"), &[s(&home.join(".grok/skills"))]).is_err());
         std::fs::remove_dir_all(&b).unwrap();
     }
 }

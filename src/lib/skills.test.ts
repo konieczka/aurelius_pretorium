@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentsOf, clashes, listNames, lostWithout, matches, shortPath, validName, type Location, type Skill } from "./skills";
+import { accessPlan, agentsOf, body, clashes, listNames, lostWithout, matches, shortPath, validName, type Location, type Skill } from "./skills";
 
 const locations: Location[] = [
   { dir: "/h/.claude/skills", scope: "global", agents: ["claude", "grok", "opencode"], label: null },
@@ -57,4 +57,30 @@ test("search matches name or description, within an agent", () => {
 test("lists read naturally", () => {
   expect(listNames(["Codex"])).toBe("Codex");
   expect(listNames(["A", "B", "C"])).toBe("A, B and C");
+});
+
+test("access goes through the fewest folders of the skill's scope", () => {
+  const locs: Location[] = [
+    ...locations,
+    { dir: "/h/.codex/skills", scope: "global", agents: ["codex"], label: null },
+    { dir: "/h/.gemini/config/skills", scope: "global", agents: ["antigravity"], label: null },
+    { dir: "/h/.grok/skills", scope: "global", agents: ["grok"], label: null },
+    { dir: "/p/.agents/skills", scope: "project", agents: ["codex", "antigravity", "opencode"], label: null },
+  ];
+  const own = (dir: string) => ({ path: dir + "/x", location: dir, scope: "global" as const, link: false });
+  const codexOnly = skill({ agents: ["codex"], places: [own("/h/.codex/skills")] });
+  const dirs = (k: Skill, a: Parameters<typeof accessPlan>[1]) => accessPlan(k, a, locs).map((l) => l.dir);
+  expect(dirs(codexOnly, ["claude", "grok", "antigravity", "opencode"])).toEqual(["/h/.claude/skills", "/h/.gemini/config/skills"]);
+  expect(dirs(codexOnly, ["grok"])).toEqual(["/h/.claude/skills"]); // tie: the backend's order
+  expect(dirs(codexOnly, ["codex"])).toEqual([]); // already has it
+  const project = skill({ scope: "project", agents: ["claude", "grok", "opencode"], places: [{ ...own("/p/.claude/skills"), scope: "project" }] });
+  expect(dirs(project, ["codex"])).toEqual(["/p/.agents/skills"]);
+  const managed = skill({ scope: "managed", agents: ["codex"], places: [own("/h/.codex/skills/.system")] });
+  expect(dirs(managed, ["opencode"])).toEqual(["/h/.claude/skills"]);
+});
+
+test("the preview drops the frontmatter", () => {
+  expect(body("---\nname: a\ndescription: b\n---\n\n# A\n")).toBe("# A\n");
+  expect(body("# No frontmatter")).toBe("# No frontmatter");
+  expect(body("---\r\nname: a\r\n---\r\nText")).toBe("Text");
 });

@@ -210,7 +210,7 @@
   {#if svgSrc}{#key svgSrc}<Media {path} src={svgSrc} />{/key}{/if}
 {:else if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="md selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
+  <div class="md md-content selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
     {@html html}
   </div>
 {/if}
@@ -269,73 +269,10 @@
     color: var(--muted-foreground);
     font-size: 13px;
   }
-  /* Markdown preview: Aurelius MarkdownContent rules */
   .md {
     padding: 28px 44px;
-    color: var(--foreground);
-    font-size: 14px;
-    line-height: 1.625;
   }
-  .md :global(> *) {
+  .md > :global(*) {
     max-width: 780px;
   }
-  .md :global(:is(h1, h2, h3, h4, h5, h6)) {
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  .md :global(h1) { font-size: 1.25rem; margin: 1.25rem 0 0.75rem; }
-  .md :global(h2) { font-size: 1.125rem; margin: 1.25rem 0 0.5rem; }
-  .md :global(h3) { font-size: 1rem; margin: 1rem 0 0.5rem; }
-  .md :global(:is(h4, h5)) { font-size: 0.875rem; }
-  .md :global(h6) { font-size: 0.875rem; font-weight: 500; color: var(--muted-foreground); }
-  .md :global(p) { margin: 0 0 0.75rem; }
-  .md :global(strong) { font-weight: 800; }
-  .md :global(a) {
-    color: var(--foreground);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-  .md :global(a:hover) { opacity: 0.8; }
-  .md :global(:is(ul, ol)) { margin: 0 0 0.75rem; padding-left: 1.25rem; }
-  .md :global(li + li) { margin-top: 0.25rem; }
-  .md :global(code) {
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    background: var(--muted);
-    padding: 0.125rem 0.25rem;
-    border-radius: 4px;
-  }
-  .md :global(pre) {
-    background: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    font-size: 12px;
-    overflow-x: auto;
-  }
-  .md :global(pre code) {
-    padding: 0;
-    background: none;
-    font-size: inherit;
-  }
-  .md :global(blockquote) {
-    margin: 0 0 0.75rem;
-    padding-left: 0.75rem;
-    border-left: 2px solid var(--border);
-    font-style: italic;
-    color: var(--muted-foreground);
-  }
-  .md :global(table) {
-    border-collapse: collapse;
-    font-size: 12px;
-    margin-bottom: 0.75rem;
-  }
-  .md :global(thead) { background: var(--muted); }
-  .md :global(:is(th, td)) {
-    border: 1px solid var(--border);
-    padding: 6px 8px;
-  }
-  .md :global(th) { font-weight: 600; text-align: left; }
-  .md :global(hr) { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
-  .md :global(img) { max-width: 100%; border-radius: var(--radius-md); }
 </style>

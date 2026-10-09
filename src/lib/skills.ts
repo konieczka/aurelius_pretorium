@@ -64,3 +64,29 @@ export function matches(k: Skill, query: string, agent: Provider | null) {
 export function listNames(names: string[]) {
   return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
+
+/**
+ * Skills folders to link `k` from so `agents` see it too: in its own scope (built-in and synced ones link globally),
+ * folders read by the most of them first. A folder also reaches the other agents that read it.
+ */
+export function accessPlan(k: Skill, agents: Provider[], locations: Location[]) {
+  const scope = k.scope === "project" ? "project" : "global";
+  const have = new Set(k.places.map((p) => p.location));
+  let need = agents.filter((a) => !k.agents.includes(a));
+  const out: Location[] = [];
+  while (need.length) {
+    // Stable sort: on a tie the backend's order wins (.agents before .codex, .claude before .grok).
+    const best = locations
+      .filter((l) => l.scope === scope && !have.has(l.dir) && !out.includes(l))
+      .map((l) => ({ l, n: l.agents.filter((a) => need.includes(a)).length }))
+      .filter((x) => x.n)
+      .sort((a, b) => b.n - a.n)[0];
+    if (!best) break;
+    out.push(best.l);
+    need = need.filter((a) => !best.l.agents.includes(a));
+  }
+  return out;
+}
+
+/** A SKILL.md without its frontmatter block (the page shows name and description already). */
+export const body = (text: string) => text.replace(/^﻿?---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, "").trimStart();

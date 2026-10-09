@@ -16,7 +16,7 @@
   import Usage from "$lib/Usage.svelte";
   import { closeUsage, toggleUsage, usage, warmUsage } from "$lib/usageView.svelte";
   import Skills from "$lib/Skills.svelte";
-  import { closeSkills, skills, toggleSkills } from "$lib/skillsView.svelte";
+  import { closeSkills, saveSkill, skills, toggleSkillMode, toggleSkills } from "$lib/skillsView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
@@ -77,6 +77,8 @@
       k === "w" && usage.open ? closeUsage :
       k === "k" && e.shiftKey ? toggleSkills :
       k === "w" && skills.open ? closeSkills :
+      k === "s" && skills.open ? saveSkill :
+      k === "e" && skills.open ? toggleSkillMode :
       k === "t" ? newTerminal :
       k === "n" ? newNote :
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
