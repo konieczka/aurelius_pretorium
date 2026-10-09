@@ -159,11 +159,6 @@
       </div>
     {/each}
     <span class="spacer"></span>
-    {#if tab?.kind === "file" && hasPreview(tab.path)}
-      <button class="icon-btn" onclick={() => (tab.preview = !tab.preview)} title={tab.preview ? "Edit (⌘E)" : "Preview (⌘E)"}>
-        {#if tab.preview}<Pencil size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
-      </button>
-    {/if}
     <button class="icon-btn" onclick={here(newNote)} title="New note (⌘N)"><NotebookPen size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><SquareTerminal size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
@@ -175,8 +170,17 @@
       {#if where.wt}<span class="seg" title="Worktree: {repo?.root}"><GitFork size={12} strokeWidth={1.5} />{where.wt}</span>{/if}
       {#if where.branch}<span class="seg" title="Branch"><GitBranch size={12} strokeWidth={1.5} />{where.branch}</span>{/if}
       {#if where.rel}<span class="rel">{where.rel}</span>{/if}
-      {#if tab.kind === "file" && !mediaKind(tab.path) && !tab.preview}
-        <button class="icon-btn wrap" class:on={tab.wrap !== false} onclick={() => (tab.wrap = tab.wrap === false)} title={tab.wrap !== false ? "Don't wrap lines" : "Wrap lines"} aria-pressed={tab.wrap !== false}><TextWrap size={13} strokeWidth={1.5} /></button>
+      {#if tab.kind === "file" && !mediaKind(tab.path)}
+        <span class="actions">
+          {#if !tab.preview}
+            <button class="icon-btn wrap" class:on={tab.wrap !== false} onclick={() => (tab.wrap = tab.wrap === false)} title={tab.wrap !== false ? "Don't wrap lines" : "Wrap lines"} aria-pressed={tab.wrap !== false}><TextWrap size={13} strokeWidth={1.5} /></button>
+          {/if}
+          {#if hasPreview(tab.path)}
+            <button class="icon-btn" onclick={() => (tab.preview = !tab.preview)} title={tab.preview ? "Edit (⌘E)" : "Preview (⌘E)"}>
+              {#if tab.preview}<Pencil size={13} strokeWidth={1.5} />{:else}<Eye size={13} strokeWidth={1.5} />{/if}
+            </button>
+          {/if}
+        </span>
       {/if}
     </div>
   {/if}
@@ -382,11 +386,14 @@
     white-space: nowrap;
     overflow: hidden;
   }
-  .wrap {
-    width: 20px;
-    height: 20px;
+  .actions {
+    display: flex;
     margin-left: auto;
     flex: none;
+  }
+  .actions > .icon-btn {
+    width: 20px;
+    height: 20px;
   }
   .wrap.on {
     color: var(--gold);
