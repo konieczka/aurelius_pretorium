@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Monitor, Moon, PanelLeft, Plus, Sun, X } from "@lucide/svelte";
+  import { Flame, Monitor, Moon, PanelLeft, Plus, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
+  import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { app, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -134,7 +135,17 @@
   {/each}
   {#if ws.incoming}<div class="ws ghost"><span class="name">{nameOf(ws.incoming)}</span></div>{/if}
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
-  <button class="icon-btn theme" onclick={cycleTheme} title="Theme: {theme.mode}" aria-label="Theme: {theme.mode}. Click to change.">
+  <button
+    class="icon-btn awake"
+    class:on={awake.on}
+    onclick={toggleStayAwake}
+    title="Stay Awake: {awake.on ? 'on' : 'off'}"
+    aria-label="Stay Awake"
+    aria-pressed={awake.on}
+  >
+    <Flame size={14} strokeWidth={1.5} />
+  </button>
+  <button class="icon-btn" onclick={cycleTheme} title="Theme: {theme.mode}" aria-label="Theme: {theme.mode}. Click to change.">
     <ThemeIcon size={14} strokeWidth={1.5} />
   </button>
 </div>
@@ -176,8 +187,43 @@
   .bar > .mark {
     margin: 0 6px 0 4px;
   }
-  .theme {
+  .awake {
     margin-left: auto;
+  }
+  /* Lit while keeping the Mac awake: an amber flame with a slow, soft pulse */
+  .awake {
+    --ember: oklch(0.68 0.18 52);
+    --ember-glow: oklch(0.72 0.19 50 / 40%);
+  }
+  :global(.dark) .awake {
+    --ember: oklch(0.8 0.16 62);
+    --ember-glow: oklch(0.78 0.18 55 / 45%);
+  }
+  .awake.on {
+    color: var(--ember);
+  }
+  .awake.on :global(svg) {
+    fill: color-mix(in oklch, var(--ember) 35%, transparent);
+    animation: glow 3s ease-in-out infinite;
+  }
+  /* Only colour and glow breathe; the shape stays put */
+  @keyframes glow {
+    0%,
+    100% {
+      fill: color-mix(in oklch, var(--ember) 25%, transparent);
+      filter: drop-shadow(0 0 1px var(--ember-glow));
+    }
+    50% {
+      fill: color-mix(in oklch, var(--ember) 50%, transparent);
+      filter: drop-shadow(0 0 4px var(--ember-glow));
+    }
+  }
+  /* The global reduced-motion rule shortens animations to 1ms, which would make an infinite one strobe */
+  @media (prefers-reduced-motion: reduce) {
+    .awake.on :global(svg) {
+      animation: none;
+      filter: drop-shadow(0 0 3px var(--ember-glow));
+    }
   }
   .ws {
     position: relative;
