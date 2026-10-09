@@ -43,6 +43,18 @@ export function fleetRows(workspaces: { id: string; tabs: Tab[] }[], shells: Rec
   return rows.sort((a, b) => rank(a) - rank(b) || (a.since ?? Infinity) - (b.since ?? Infinity));
 }
 
+export type Group = { key: string; rows: Row[] };
+
+/** Rows by project (`projectOf` -> its folder), keeping their order: the project with the most urgent agent comes first. */
+export function byProject(rows: Row[], projectOf: (r: Row) => string): Group[] {
+  const groups = new Map<string, Row[]>();
+  for (const r of rows) {
+    const k = projectOf(r);
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  return [...groups].map(([key, rows]) => ({ key, rows }));
+}
+
 const statusOf = (s: Shell): Status => (s.busy ? "busy" : s.attention ? "attention" : "idle");
 
 /** 42s, 5m, 3h, 2d */

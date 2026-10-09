@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Radar, SlidersHorizontal, Sun, X } from "@lucide/svelte";
+  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, SlidersHorizontal, Sun, X } from "@lucide/svelte";
+  import GalleyIcon from "./GalleyIcon.svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
@@ -31,6 +32,7 @@
     );
   });
   const waiting = $derived(Object.values(activity).filter((a) => a === "attention").length);
+  const running = $derived(Object.values(shells.all).filter((s) => s.agent).length);
 
   async function menu(id: string) {
     const v = await pick(nameOf(id), [
@@ -168,12 +170,13 @@
     class="icon-btn view fleet"
     class:on={fleet.open}
     onclick={toggleFleet}
-    title="Fleet: every agent, in every workspace (⇧⌘J){waiting ? ` · ${waiting} need${waiting === 1 ? 's' : ''} you` : ''}"
-    aria-label="Fleet"
+    title="Fleet: {running} agent{running === 1 ? '' : 's'} running{waiting ? `, ${waiting} need${waiting === 1 ? 's' : ''} you` : ''} (⇧⌘J)"
+    aria-label="Fleet: {running} agent{running === 1 ? '' : 's'} running"
     aria-pressed={fleet.open}
   >
-    <Radar size={14} strokeWidth={1.5} />
-    {#if waiting}<span class="badge">{waiting}</span>{/if}
+    <GalleyIcon size={15} />
+    {#if running}<span class="count">{running}</span>{/if}
+    {#if waiting}<span class="waiting"></span>{/if}
   </button>
   <button
     class="icon-btn view"
@@ -371,24 +374,28 @@
       animation: none;
     }
   }
+  /* Agents running, next to the galley; an ember dot in the corner while any wait on you */
   .fleet {
     position: relative;
+    display: inline-flex;
+    gap: 4px;
+    width: auto;
+    min-width: 26px;
+    padding: 0 6px;
   }
-  .badge {
+  .count {
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .waiting {
     position: absolute;
-    top: 1px;
-    right: -2px;
-    min-width: 13px;
-    height: 13px;
-    padding: 0 3px;
-    box-sizing: border-box;
+    top: 3px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
     border-radius: 9999px;
     background: oklch(0.7 0.17 50);
-    color: oklch(0.2 0.02 50);
-    font-size: 9px;
-    font-weight: 600;
-    line-height: 13px;
-    text-align: center;
+    box-shadow: 0 0 0 1.5px var(--sidebar);
   }
   .x {
     opacity: 0;

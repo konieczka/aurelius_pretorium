@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanTitle, fleetRows, fmtSpan } from "./fleet";
+import { byProject, cleanTitle, fleetRows, fmtSpan, type Row } from "./fleet";
 import type { Shell } from "./agents.svelte";
 import type { Tab } from "./layout";
 
@@ -32,6 +32,15 @@ test("one row per agent, most urgent first", () => {
 
 test("a shell whose agent quit drops the saved one", () => {
   expect(fleetRows([{ id: "w", tabs: [term("t", { agent: "claude" })] }], { t: shell({ agent: null }) })).toEqual([]);
+});
+
+test("projects in order of their most urgent agent", () => {
+  const row = (id: string, cwd: string) => ({ id, cwd }) as Row;
+  const groups = byProject([row("a", "/x/wt"), row("b", "/y"), row("c", "/x"), row("d", "/y")], (r) => (r.cwd === "/x/wt" ? "/x" : r.cwd));
+  expect(groups.map((g) => [g.key, g.rows.map((r) => r.id)])).toEqual([
+    ["/x", ["a", "c"]],
+    ["/y", ["b", "d"]],
+  ]);
 });
 
 test("titles lose the status glyph", () => {

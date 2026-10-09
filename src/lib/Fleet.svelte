@@ -2,13 +2,13 @@
   import { untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { ArrowRight, FolderGit2, GitBranch, X } from "@lucide/svelte";
+  import { ArrowRight, Folder, FolderGit2, GitBranch, X } from "@lucide/svelte";
   import ProviderIcon from "./ProviderIcon.svelte";
   import { agentProvider, shells } from "./agents.svelte";
   import { closeFleet } from "./fleetView.svelte";
-  import { fleetRows, fmtSpan, STATUSES, type Row, type Status } from "./fleet";
+  import { byProject, fleetRows, fmtSpan, STATUSES, type Row, type Status } from "./fleet";
   import { providerName } from "./usageStats";
-  import { app, refreshRepo } from "./state.svelte";
+  import { app, ownerOf, refreshRepo } from "./state.svelte";
   import { nameOf, ownerWindow, showTab, tabsIn, ws } from "./workspaces.svelte";
 
   // Layouts are re-read on every poll (each second): other windows and moves between workspaces don't tell us.
@@ -16,7 +16,15 @@
     void shells.polled;
     return fleetRows(ws.all.map((m) => ({ id: m.id, tabs: tabsIn(m.id) })), shells.all);
   });
-  const groups = $derived(STATUSES.map((s) => ({ s, rows: rows.filter((r) => r.status === s) })).filter((g) => g.rows.length));
+  // A project is a repo, its worktrees included; else (or until the repo is looked up) the opened folder the agent is
+  // in, or its own folder.
+  const projectOf = (r: Row) => {
+    const repo = app.repos[r.cwd];
+    if (repo?.root) return repo.main || repo.root;
+    const owner = ownerOf(r.cwd);
+    return app.recent.includes(owner) ? owner : r.cwd;
+  };
+  const groups = $derived(byProject(rows, projectOf));
   const count = (s: Status) => rows.filter((r) => r.status === s).length;
 
   const heading: Record<Status, string> = { attention: "Needs you", busy: "Working", idle: "Idle", asleep: "Not started" };
@@ -77,9 +85,9 @@
       </div>
     {/if}
 
-    {#each groups as g (g.s)}
+    {#each groups as g (g.key)}
       <section>
-        <h2>{heading[g.s]} <span class="n">{g.rows.length}</span></h2>
+        <h2 title={g.key}><FolderGit2 size={13} strokeWidth={1.5} />{base(g.key)} <span class="n">{g.rows.length}</span></h2>
         <div class="list">
           {#each g.rows as r (r.id)}
             {@const n = name(r)}
@@ -99,7 +107,7 @@
                 <span class="where">
                   <span class="ws" title={w.hint}>{w.text}</span>
                   <span class="loc" title={r.cwd}>
-                    <FolderGit2 size={12} strokeWidth={1.5} />{base(repo?.root || r.cwd)}
+                    {#if (repo?.root || r.cwd) !== g.key}<span class="br"><Folder size={12} strokeWidth={1.5} />{base(repo?.root || r.cwd)}</span>{/if}
                     {#if repo?.branch}<span class="br"><GitBranch size={12} strokeWidth={1.5} />{repo.branch}</span>{/if}
                     {#if repo?.main}<span class="wt" title="Worktree of {repo.main}">worktree</span>{/if}
                   </span>
@@ -151,17 +159,19 @@
     margin-top: 24px;
   }
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 0 0 8px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+  }
+  h2 > :global(svg) {
     color: var(--muted-foreground);
   }
   .n {
-    margin-left: 4px;
+    color: var(--muted-foreground);
     font-weight: 500;
-    letter-spacing: 0;
   }
   .muted {
     color: var(--muted-foreground);
@@ -253,7 +263,7 @@
   .br {
     display: contents;
   }
-  .br > :global(svg) {
+  .br + .br > :global(svg) {
     margin-left: 6px;
   }
   .wt {
