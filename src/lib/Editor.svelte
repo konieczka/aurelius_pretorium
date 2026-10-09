@@ -103,7 +103,7 @@
 
   function create(tabId: string, path: string): Entry {
     const e: Entry = { host: document.createElement("div") };
-    e.host.className = "editor-host";
+    e.host.className = "editor-host selectable"; // code, or the read error
     entries.set(tabId, e);
     const draft = drafts.get(tabId);
     drafts.delete(tabId);
@@ -190,7 +190,7 @@
 {/if}
 {#if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="md" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
+  <div class="md selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
     {@html html}
   </div>
 {/if}

@@ -44,18 +44,22 @@
   // title bar); then the tab tears off into its own window, which follows the cursor (Chrome-style).
   const win = getCurrentWindow();
   let bar: HTMLDivElement;
-  let press: { id: string; grabX: number } | null = null;
+  let press: { id: string; grabX: number; x: number; at: number; moved: boolean } | null = null;
+  // Thresholds that keep a slightly sloppy click a click: a drag only reorders after REORDER px, and tears off only
+  // once the cursor is TEAR px past the bar (above it that's past the title bar) and the tab was held HOLD ms.
+  const REORDER = 6, TEAR = 48, HOLD = 150;
 
   function down(e: PointerEvent, id: string) {
     if (e.button !== 0 || editing === id || (e.target as Element).closest("button")) return;
     activate(id);
-    const p = (press = { id, grabX: e.clientX - (e.currentTarget as HTMLElement).getBoundingClientRect().left });
+    const grabX = e.clientX - (e.currentTarget as HTMLElement).getBoundingClientRect().left;
+    const p = (press = { id, grabX, x: e.clientX, at: performance.now(), moved: false });
     bar.setPointerCapture(e.pointerId);
     watch(p);
   }
 
   function move(e: PointerEvent) {
-    if (!press) return;
+    if (!press || !(press.moved ||= Math.abs(e.clientX - press.x) > REORDER)) return;
     const b = bar.getBoundingClientRect();
     const over = document.elementFromPoint(e.clientX, b.top + b.height / 2)?.closest<HTMLElement>("[data-ws]")?.dataset.ws;
     if (over) moveWorkspace(press.id, over);
@@ -71,7 +75,8 @@
       if (press !== p) return;
       if (!held) return void (press = null); // released (maybe outside the window, where we'd get no pointerup)
       const [x, y] = [(c.x - inner.x) / px, (c.y - inner.y) / px]; // cursor in this page's CSS px
-      if (y < b.top - 20 || y > b.bottom + 20 || x < 0 || x > size.width / px) {
+      const off = y < b.top - TEAR || y > b.bottom + TEAR || x < -TEAR || x > size.width / px + TEAR;
+      if (off && performance.now() - p.at > HOLD) {
         press = null;
         // Only workspace: the window keeps its place under the cursor. Else the cursor holds the new window's (first) tab.
         tearOut(p.id, ws.open.length === 1 ? { x: x * zoom, y: y * zoom } : { x: (6 + p.grabX) * zoom, y: (b.height / 2) * zoom });
@@ -167,7 +172,6 @@
     color: var(--muted-foreground);
     font-size: 12px;
     cursor: default;
-    user-select: none;
   }
   .ws:hover,
   .ws.active {

@@ -92,9 +92,9 @@
   });
 </script>
 
-<div class="diff" bind:this={el}>
+<div class="diff selectable" bind:this={el}>
   {#if note}
-    <div class="note">{note}</div>
+    <div class="note selectable">{note}</div>
   {:else if total}
     <div class="nav">
       <span class="count">{at ? `${at} of ${total}` : total} {total === 1 ? "change" : "changes"}</span>

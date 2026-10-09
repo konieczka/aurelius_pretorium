@@ -290,7 +290,7 @@
     {#if git.op}
       {@const left = conflicts(s).length}
       <div class="banner">
-        <div class="btitle"><GitMerge size={14} strokeWidth={1.5} />{git.opInfo || git.op}</div>
+        <div class="btitle selectable"><GitMerge size={14} strokeWidth={1.5} />{git.opInfo || git.op}</div>
         <div class="bsub">
           {left ? `${left} conflicted ${left === 1 ? "file" : "files"}: open each, accept changes or edit, then Mark as Resolved.` : "All conflicts resolved."}
         </div>

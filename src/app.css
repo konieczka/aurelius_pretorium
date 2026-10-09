@@ -134,6 +134,19 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
+/* Desktop app: chrome (tabs, buttons, labels, trees) isn't text to select, so drags don't highlight it.
+   Selection is opt-in for real content. WKWebView only honors the -webkit- prefix. xterm does its own selection. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable],
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
 /* Paper texture over the gradient field */
 body::before {
   content: "";
