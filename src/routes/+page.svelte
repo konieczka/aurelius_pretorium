@@ -17,6 +17,8 @@
   import { closeUsage, toggleUsage, usage, warmUsage } from "$lib/usageView.svelte";
   import Skills from "$lib/Skills.svelte";
   import { closeSkills, saveSkill, skills, toggleSkillMode, toggleSkills } from "$lib/skillsView.svelte";
+  import AgentSettings from "$lib/AgentSettings.svelte";
+  import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
@@ -79,6 +81,9 @@
       k === "w" && skills.open ? closeSkills :
       k === "s" && skills.open ? saveSkill :
       k === "e" && skills.open ? toggleSkillMode :
+      k === "a" && e.shiftKey ? toggleAgents :
+      k === "w" && agents.open ? closeAgents :
+      k === "s" && agents.open ? saveAgentFile :
       k === "t" ? newTerminal :
       k === "n" ? newNote :
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
@@ -150,9 +155,9 @@
         <div class="tree"><GitPanel /></div>
       {/if}
     </aside>
-    <!-- The Usage and Skills views stand in for the panes; they stay mounted (terminals keep running) -->
-    <main class:away={usage.open || skills.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
-    {#if usage.open}<Usage />{:else if skills.open}<Skills />{/if}
+    <!-- The Usage, Skills and Agents views stand in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open || skills.open || agents.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{/if}
     <StatusBar />
   </div>
   <QuickPick />

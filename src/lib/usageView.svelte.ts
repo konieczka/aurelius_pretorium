@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Limit, Provider, Row } from "./usageStats";
 import { closeSkills } from "./skillsView.svelte";
+import { closeAgents } from "./agentsView.svelte";
 
-// The Usage view stands in for this window's panes while open (they stay mounted underneath). Per window, not saved.
+// The Usage view stands in for this window's panes while open (they stay mounted underneath), taking turns with Skills and Agents. Per window, not saved.
 export const usage = $state({
   open: false,
   days: 7 as 7 | 30 | 90,
@@ -17,7 +18,7 @@ export const usage = $state({
 
 export function toggleUsage() {
   usage.open = !usage.open;
-  if (usage.open) closeSkills();
+  if (usage.open) (closeSkills(), closeAgents());
 }
 export const closeUsage = () => (usage.open = false);
 
