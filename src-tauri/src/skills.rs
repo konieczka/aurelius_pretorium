@@ -374,6 +374,11 @@ fn link(home: &Path, project: &Path, skill: &Path, dirs: &[String]) -> Res<()> {
     if !skill.join("SKILL.md").is_file() {
         return Err(format!("{} isn't a skill", skill.display()));
     }
+    // Built-in and synced skills belong to their agent, which may change or drop them.
+    let locs = locations(home, project);
+    if locs.iter().any(|l| l.scope == Scope::Managed && skill.parent() == Some(l.dir.as_path())) {
+        return Err(format!("{} is managed by its agent", skill.display()));
+    }
     let name = skill.file_name().ok_or("no folder name")?;
     let editable = editable(home, project);
     // Every target must be a skills folder and free before anything is linked.
@@ -563,6 +568,10 @@ mod tests {
         assert!(link(&home, &proj, &skill, &[gemini]).unwrap_err().contains("already exists"));
         assert!(link(&home, &proj, &skill, &[s(&proj.join("src"))]).is_err());
         assert!(link(&home, &proj, &proj.join("nope"), &[s(&home.join(".grok/skills"))]).is_err());
+        let builtin = home.join(".codex/skills/.system/imagegen");
+        std::fs::create_dir_all(&builtin).unwrap();
+        std::fs::write(builtin.join("SKILL.md"), "---\nname: imagegen\n---\n").unwrap();
+        assert!(link(&home, &proj, &builtin, &[s(&home.join(".claude/skills"))]).unwrap_err().contains("managed"));
         std::fs::remove_dir_all(&b).unwrap();
     }
 }

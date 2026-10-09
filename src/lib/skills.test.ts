@@ -76,7 +76,7 @@ test("access goes through the fewest folders of the skill's scope", () => {
   const project = skill({ scope: "project", agents: ["claude", "grok", "opencode"], places: [{ ...own("/p/.claude/skills"), scope: "project" }] });
   expect(dirs(project, ["codex"])).toEqual(["/p/.agents/skills"]);
   const managed = skill({ scope: "managed", agents: ["codex"], places: [own("/h/.codex/skills/.system")] });
-  expect(dirs(managed, ["opencode"])).toEqual(["/h/.claude/skills"]);
+  expect(dirs(managed, ["opencode"])).toEqual([]);
 });
 
 test("the preview drops the frontmatter", () => {

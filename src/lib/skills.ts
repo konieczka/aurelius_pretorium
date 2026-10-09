@@ -66,11 +66,12 @@ export function listNames(names: string[]) {
 }
 
 /**
- * Skills folders to link `k` from so `agents` see it too: in its own scope (built-in and synced ones link globally),
- * folders read by the most of them first. A folder also reaches the other agents that read it.
+ * Skills folders of `k`'s scope to link it from so `agents` see it too, folders read by the most of them first.
+ * A folder also reaches the other agents that read it. None for built-in and synced skills: their agent owns them.
  */
 export function accessPlan(k: Skill, agents: Provider[], locations: Location[]) {
-  const scope = k.scope === "project" ? "project" : "global";
+  if (k.scope === "managed") return [];
+  const scope = k.scope;
   const have = new Set(k.places.map((p) => p.location));
   let need = agents.filter((a) => !k.agents.includes(a));
   const out: Location[] = [];
