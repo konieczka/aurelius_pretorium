@@ -68,6 +68,9 @@ export function toggleSidebar() {
   store.set("sidebarOpen", String(app.sidebarOpen));
 }
 
+/** Share the workspace's space evenly between its panes. */
+export const arrangePanes = () => L.equalize(app.root);
+
 const term = (): L.Tab => ({ id: L.uid(), kind: "term", cwd: app.workspace });
 
 /** Show `path` in the sidebar. Open tabs are untouched. */

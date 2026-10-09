@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Flame, Gauge, Monitor, Moon, PanelLeft, Plus, Sun, X } from "@lucide/svelte";
+  import { Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
-  import { app, toggleSidebar } from "./state.svelte";
+  import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
@@ -97,10 +97,16 @@
 </script>
 
 <div class="bar" class:merging={ws.incoming} role="tablist" tabindex="-1" bind:this={bar} onpointermove={move} onpointerup={up} onlostpointercapture={up}>
+  <!-- Always here, before the logo, so toggling the sidebar doesn't shift the tabs -->
+  <button
+    class="icon-btn"
+    onclick={toggleSidebar}
+    title="{app.sidebarOpen ? 'Hide' : 'Show'} sidebar (⌘B)"
+    aria-label="{app.sidebarOpen ? 'Hide' : 'Show'} sidebar"
+  >
+    {#if app.sidebarOpen}<PanelLeftClose size={14} strokeWidth={1.5} />{:else}<PanelLeft size={14} strokeWidth={1.5} />{/if}
+  </button>
   <span class="mark"></span>
-  {#if !app.sidebarOpen}
-    <button class="icon-btn" onclick={toggleSidebar} title="Show sidebar (⌘B)" aria-label="Show sidebar"><PanelLeft size={14} strokeWidth={1.5} /></button>
-  {/if}
   {#each ws.open as id (id)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
@@ -136,6 +142,9 @@
   {/each}
   {#if ws.incoming}<div class="ws ghost"><span class="name">{nameOf(ws.incoming)}</span></div>{/if}
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
+  <button class="icon-btn arrange" onclick={arrangePanes} title="Auto-arrange panes" aria-label="Auto-arrange panes">
+    <LayoutGrid size={14} strokeWidth={1.5} />
+  </button>
   <button
     class="icon-btn usage"
     class:on={usage.open}
@@ -198,7 +207,7 @@
   .bar > .mark {
     margin: 0 6px 0 4px;
   }
-  .usage {
+  .arrange {
     margin-left: auto;
   }
   .usage.on {
