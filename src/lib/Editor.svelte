@@ -53,6 +53,15 @@
   export const focusEditor = (tabId: string) => entries.get(tabId)?.view?.focus();
   const text = (tabId: string) => entries.get(tabId)?.view?.state.doc.toString() ?? "";
 
+  // Unsaved text carried over from another window (its workspace moved here): opens in place of the file, still unsaved.
+  const drafts = new Map<string, string>();
+  export function queueDraft(tabId: string, text: string) {
+    drafts.set(tabId, text);
+    app.dirty[tabId] = true; // the tab shows as unsaved before its editor opens
+  }
+  /** A tab's unsaved text, including a carried-over draft whose editor hasn't opened yet. */
+  export const draftOf = (tabId: string) => (entries.get(tabId)?.view ? (app.dirty[tabId] ? text(tabId) : undefined) : drafts.get(tabId));
+
   // Aurelius theme in CSS variables only, so light/dark switching restyles editors live.
   export const aurelius = [
     EditorView.theme({
@@ -96,7 +105,9 @@
     const e: Entry = { host: document.createElement("div") };
     e.host.className = "editor-host";
     entries.set(tabId, e);
-    invoke<string>("read_file", { path }).then(
+    const draft = drafts.get(tabId);
+    drafts.delete(tabId);
+    (draft !== undefined ? Promise.resolve(draft) : invoke<string>("read_file", { path })).then(
       (doc) => {
         const lang = new Compartment();
         e.view = new EditorView({
@@ -120,7 +131,7 @@
         });
         languageFor(path)?.then((support) => e.view?.dispatch({ effects: lang.reconfigure(support) }));
         app.conflicts[tabId] = conflictsIn(e.view.state).length;
-        app.dirty[tabId] = false; // nudge reactivity so the preview renders once loaded
+        app.dirty[tabId] = draft !== undefined; // also nudges reactivity so the preview renders once loaded
       },
       (err) => {
         e.error = String(err);

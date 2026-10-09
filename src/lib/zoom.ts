@@ -6,6 +6,9 @@ try {
   level = Number(localStorage.getItem("zoom")) || 1;
 } catch {}
 
+/** Current webview zoom: CSS px × level = logical window px. */
+export const zoomLevel = () => level;
+
 export function zoom(delta: number | null) {
   // null = reset; round to avoid 1.0999999 drift
   level = delta === null ? 1 : Math.round(Math.min(2, Math.max(0.5, level + delta)) * 10) / 10;

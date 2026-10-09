@@ -22,19 +22,21 @@
   };
 
   // Terminals outlive their component so moving a tab or re-splitting never kills the shell.
-  type Entry = { term: Terminal; fit: FitAddon; host: HTMLDivElement; pty?: number };
+  // The shell itself lives in the backend under the tab id and outlives this window too (reload, workspace moved).
+  type Entry = { term: Terminal; fit: FitAddon; host: HTMLDivElement; ready: boolean };
   const entries = new Map<string, Entry>();
 
-  export function disposeTerm(tabId: string) {
+  /** Drop the tab's terminal view; `kill` also ends its shell (else it keeps running for another window to attach). */
+  export function disposeTerm(tabId: string, kill = true) {
+    if (kill) invoke("pty_kill", { id: tabId });
     const e = entries.get(tabId);
     if (!e) return;
-    if (e.pty !== undefined) invoke("pty_kill", { id: e.pty });
     e.term.dispose();
     e.host.remove();
     entries.delete(tabId);
   }
 
-  // Input to type into a terminal as soon as its shell is spawned (not persisted with the layout).
+  // Input to type into a terminal as soon as its shell is attached (not persisted with the layout).
   const pending = new Map<string, string>();
   export const queueInput = (tabId: string, data: string) => pending.set(tabId, data);
 
@@ -65,21 +67,22 @@
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     fit.fit();
 
-    const e: Entry = { term, fit, host };
+    const e: Entry = { term, fit, host, ready: false };
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => {
       if (buf.byteLength) term.write(new Uint8Array(buf));
       else term.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
     };
-    invoke<number>("pty_spawn", { cwd, cols: term.cols, rows: term.rows, onData })
-      .then((id) => {
-        e.pty = id;
-        const data = pending.get(tabId);
-        if (data) pending.delete(tabId), invoke("pty_write", { id, data });
+    const id = tabId;
+    invoke("pty_open", { id, cwd, cols: term.cols, rows: term.rows, onData })
+      .then(() => {
+        e.ready = true;
+        const data = pending.get(id);
+        if (data) pending.delete(id), invoke("pty_write", { id, data });
       })
       .catch((err) => term.write(`\x1b[31m${err}\x1b[0m\r\n`));
-    term.onData((data) => e.pty !== undefined && invoke("pty_write", { id: e.pty, data }));
-    term.onResize(({ cols, rows }) => e.pty !== undefined && invoke("pty_resize", { id: e.pty, cols, rows }));
+    term.onData((data) => e.ready && invoke("pty_write", { id, data }));
+    term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }));
     term.onTitleChange((t) => (app.titles[tabId] = t));
     entries.set(tabId, e);
     return e;

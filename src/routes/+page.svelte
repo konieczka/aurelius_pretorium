@@ -7,16 +7,16 @@
   import StatusBar from "$lib/StatusBar.svelte";
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
   import FileTree from "$lib/FileTree.svelte";
+  import WorkspaceBar from "$lib/WorkspaceBar.svelte";
+  import { initWorkspaces, save } from "$lib/workspaces.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, lastWorkspace, moveInto, undoTree, newTerminal, openWorkspace, saveLayout, splitFocused, startCreate,
+    app, activeTab, closeTab, deleteSelected, moveInto, undoTree, newTerminal, openWorkspace, splitFocused, startCreate,
   } from "$lib/state.svelte";
 
-  const last = lastWorkspace();
-  if (last) openWorkspace(last);
-
-  $effect(saveLayout);
+  initWorkspaces();
+  $effect(save);
   $effect(() => {
     if (app.workspace) return watchGit();
   });
@@ -75,6 +75,7 @@
 
 {#if app.workspace}
   <div class="app">
+    <WorkspaceBar />
     <aside onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <span class="mark"></span>
@@ -143,7 +144,7 @@
   .app {
     display: grid;
     grid-template-columns: 248px 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     height: 100vh;
   }
   aside {

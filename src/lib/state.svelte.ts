@@ -4,20 +4,22 @@ import * as L from "./layout";
 import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
 
-const store = {
+// localStorage is shared by all windows of the app.
+export const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} },
+  remove: (k: string) => { try { localStorage.removeItem(k); } catch {} },
 };
 
-function load<T>(key: string, fallback: T): T {
+export function load<T>(key: string, fallback: T): T {
   try { return JSON.parse(store.get(key) ?? "null") ?? fallback; } catch { return fallback; }
 }
 
-// One layout for the whole window: tabs from any folder/project stay open while the sidebar switches between them.
-// ("layout:<path>" is the old per-folder key, read once to migrate.)
+// root/focused/workspace belong to the active workspace (workspaces.svelte.ts swaps them); tabs from any folder can
+// sit in it while the sidebar shows another one.
 export const app = $state({
   workspace: "", // folder shown in the sidebar; new terminals start here
-  root: load<L.Split>("layout", load("layout:" + store.get("workspace"), L.rootWith(L.pane()))),
+  root: L.rootWith(L.pane()),
   recent: load<string[]>("recent", []), // opened folders, most recent first
   branches: {} as Record<string, string>, // folder -> current branch, for tabs outside the workspace
   focused: "", // pane id
@@ -35,9 +37,6 @@ export const app = $state({
   gitVersion: 0, // bumped on save / git ops: diff views refetch
   treeFocused: false, // last interaction was in the sidebar: ⌘Z / ⌘⌫ go to the tree, not the editor/terminal
 });
-
-export const lastWorkspace = () => store.get("workspace");
-export const saveLayout = () => store.set("layout", JSON.stringify(app.root));
 
 const under = (p: string, root: string) => p === root || p.startsWith(root + "/");
 /** The opened folder a path belongs to (deepest match), or its parent dir if none. */
@@ -64,7 +63,6 @@ const term = (): L.Tab => ({ id: L.uid(), kind: "term", cwd: app.workspace });
 /** Show `path` in the sidebar. Open tabs are untouched. */
 export function openWorkspace(path: string) {
   app.workspace = path;
-  store.set("workspace", path);
   app.recent = [path, ...app.recent.filter((r) => r !== path)].slice(0, 15);
   store.set("recent", JSON.stringify(app.recent));
   app.selectedDir = path;
@@ -128,8 +126,9 @@ export async function closeTab(tabId: string) {
   if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
 }
 
-function dispose(t: L.Tab) {
-  if (t.kind === "term") disposeTerm(t.id);
+/** Drop a tab's view; `kill = false` leaves a terminal's shell running (its workspace moved or was closed). */
+export function dispose(t: L.Tab, kill = true) {
+  if (t.kind === "term") disposeTerm(t.id, kill);
   else if (t.kind === "file") disposeEditor(t.id);
   delete app.dirty[t.id];
   delete app.titles[t.id];

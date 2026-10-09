@@ -1,22 +1,31 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    out: Arc<Mutex<Output>>,
 }
 
+/// Where a shell's output goes, plus its recent output so a window that (re)attaches can replay it.
+#[derive(Default)]
+struct Output {
+    chan: Option<Channel<InvokeResponseBody>>,
+    recent: Vec<u8>,
+    exited: bool,
+}
+const KEEP: usize = 512 * 1024; // ponytail: raw byte tail, not a parsed screen; replays the last ~512KB of output
+
+/// Shells keyed by terminal tab id: they outlive the window that started them (reloads, workspaces moved between windows).
 #[derive(Default)]
 struct Ptys {
-    next: AtomicU32,
-    sessions: Mutex<HashMap<u32, Session>>,
+    sessions: Mutex<HashMap<String, Session>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -82,14 +91,30 @@ async fn git(cwd: String, args: Vec<String>) -> Res<String> {
     .map_err(err)?
 }
 
+/// Attach `on_data` to the tab's shell, spawning it if it doesn't exist yet. Re-attaching replays recent output first.
 #[tauri::command]
-fn pty_spawn(
+fn pty_open(
     ptys: State<Ptys>,
+    id: String,
     cwd: String,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
-) -> Res<u32> {
+) -> Res<()> {
+    let mut sessions = ptys.sessions.lock().unwrap();
+    if let Some(s) = sessions.get(&id) {
+        let mut out = s.out.lock().unwrap();
+        if !out.recent.is_empty() {
+            let _ = on_data.send(InvokeResponseBody::Raw(out.recent.clone()));
+        }
+        if out.exited {
+            let _ = on_data.send(InvokeResponseBody::Raw(Vec::new()));
+        }
+        out.chan = Some(on_data);
+        let _ = s.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+        return Ok(());
+    }
+
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(err)?;
@@ -112,34 +137,49 @@ fn pty_spawn(
 
     let mut reader = pair.master.try_clone_reader().map_err(err)?;
     let writer = pair.master.take_writer().map_err(err)?;
+    let out = Arc::new(Mutex::new(Output { chan: Some(on_data), ..Default::default() }));
+    let sink = out.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 16 * 1024];
         while let Ok(n) = reader.read(&mut buf) {
-            if n == 0 || on_data.send(InvokeResponseBody::Raw(buf[..n].to_vec())).is_err() {
+            if n == 0 {
                 break;
+            }
+            let mut o = sink.lock().unwrap();
+            o.recent.extend_from_slice(&buf[..n]);
+            if o.recent.len() > KEEP {
+                // Cut at a line start so the replay doesn't begin mid escape sequence.
+                let cut = o.recent.len() - KEEP;
+                let cut = o.recent[cut..].iter().position(|&b| b == b'\n').map_or(cut, |i| cut + i + 1);
+                o.recent.drain(..cut);
+            }
+            if let Some(c) = &o.chan {
+                if c.send(InvokeResponseBody::Raw(buf[..n].to_vec())).is_err() {
+                    o.chan = None; // window gone; output keeps accumulating until one re-attaches
+                }
             }
         }
         // Empty message = shell exited.
-        let _ = on_data.send(InvokeResponseBody::Raw(Vec::new()));
+        let mut o = sink.lock().unwrap();
+        o.exited = true;
+        if let Some(c) = &o.chan {
+            let _ = c.send(InvokeResponseBody::Raw(Vec::new()));
+        }
     });
 
-    let id = ptys.next.fetch_add(1, Ordering::Relaxed);
-    ptys.sessions
-        .lock()
-        .unwrap()
-        .insert(id, Session { writer, master: pair.master, child });
-    Ok(id)
+    sessions.insert(id, Session { writer, master: pair.master, child, out });
+    Ok(())
 }
 
 #[tauri::command]
-fn pty_write(ptys: State<Ptys>, id: u32, data: String) -> Res<()> {
+fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let mut map = ptys.sessions.lock().unwrap();
     let s = map.get_mut(&id).ok_or("no such pty")?;
     s.writer.write_all(data.as_bytes()).map_err(err)
 }
 
 #[tauri::command]
-fn pty_resize(ptys: State<Ptys>, id: u32, cols: u16, rows: u16) -> Res<()> {
+fn pty_resize(ptys: State<Ptys>, id: String, cols: u16, rows: u16) -> Res<()> {
     let map = ptys.sessions.lock().unwrap();
     let s = map.get(&id).ok_or("no such pty")?;
     s.master
@@ -148,10 +188,86 @@ fn pty_resize(ptys: State<Ptys>, id: u32, cols: u16, rows: u16) -> Res<()> {
 }
 
 #[tauri::command]
-fn pty_kill(ptys: State<Ptys>, id: u32) {
+fn pty_kill(ptys: State<Ptys>, id: String) {
     if let Some(mut s) = ptys.sessions.lock().unwrap().remove(&id) {
         let _ = s.child.kill();
     }
+}
+
+/// Is the left mouse button physically held right now (regardless of which window has the events)?
+#[cfg(target_os = "macos")]
+fn left_button_down() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
+    }
+    // kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft
+    unsafe { CGEventSourceButtonState(0, 0) }
+}
+#[cfg(not(target_os = "macos"))]
+fn left_button_down() -> bool {
+    false // ponytail: tear-off follows the cursor on macOS only; elsewhere the window just lands at the cursor
+}
+
+/// For JS drag tracking that has to survive the cursor leaving the window.
+#[tauri::command]
+fn mouse_down() -> bool {
+    left_button_down()
+}
+
+/// The window (other than `skip`) whose title bar or workspace bar (~40 logical px under the title bar) is under `c`.
+fn bar_under(app: &AppHandle, c: PhysicalPosition<f64>, skip: &str) -> Option<String> {
+    app.webview_windows().into_iter().find_map(|(label, w)| {
+        let (p, s, inner, k) = (w.outer_position().ok()?, w.outer_size().ok()?, w.inner_position().ok()?, w.scale_factor().ok()?);
+        let hit = label != skip
+            && c.x >= p.x as f64
+            && c.x < (p.x + s.width as i32) as f64
+            && c.y >= p.y as f64
+            && c.y < inner.y as f64 + 40.0 * k;
+        hit.then_some(label)
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct TearDrop {
+    label: String,
+    target: Option<String>,
+}
+
+/// Tab tear-off: window `label` (holding workspace `id`) follows the cursor at offset dx, dy (physical px) until the
+/// left button is released; then `source` gets "tear-dropped". Runs here, not in JS: the webview stops getting
+/// pointer events once a window moves or appears under the cursor.
+/// Over another window's bar the follower hides and that window gets "merge-hint" (the workspace id, then null
+/// when the cursor leaves), like a browser tab sliding into another window's tab strip.
+#[tauri::command]
+fn follow_cursor(app: AppHandle, label: String, id: String, source: String, dx: f64, dy: f64) {
+    std::thread::spawn(move || {
+        let mut hover: Option<String> = None;
+        loop {
+            if let (Ok(c), Some(w)) = (app.cursor_position(), app.get_webview_window(&label)) {
+                let _ = w.set_position(PhysicalPosition::new(c.x - dx, c.y - dy));
+                let target = bar_under(&app, c, &label);
+                if target != hover {
+                    if let Some(old) = &hover {
+                        let _ = app.emit_to(old.as_str(), "merge-hint", None::<String>);
+                    }
+                    if let Some(new) = &target {
+                        let _ = app.emit_to(new.as_str(), "merge-hint", Some(&id));
+                    }
+                    let _ = if target.is_some() { w.hide() } else { w.show() };
+                    hover = target;
+                }
+            }
+            if !left_button_down() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(8));
+        }
+        if let Some(t) = &hover {
+            let _ = app.emit_to(t.as_str(), "merge-hint", None::<String>);
+        }
+        let _ = app.emit_to(source.as_str(), "tear-dropped", TearDrop { label, target: hover });
+    });
 }
 
 #[derive(serde::Serialize)]
@@ -284,7 +400,7 @@ pub fn run() {
         })
         .manage(Ptys::default())
         .invoke_handler(tauri::generate_handler![
-            pty_spawn, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path, git
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, list_dir, read_file, write_file, create_file, create_dir, move_path, trash_path, git
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
