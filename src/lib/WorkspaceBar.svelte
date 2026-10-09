@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, Sun, X } from "@lucide/svelte";
+  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, SlidersHorizontal, Sun, X } from "@lucide/svelte";
   import { cycleTheme, theme } from "./theme.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
+  import { agents, toggleAgents } from "./agentsView.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -155,6 +156,16 @@
     aria-pressed={skills.open}
   >
     <Brain size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view"
+    class:on={agents.open}
+    onclick={toggleAgents}
+    title="Agents (⇧⌘A)"
+    aria-label="Agents"
+    aria-pressed={agents.open}
+  >
+    <SlidersHorizontal size={14} strokeWidth={1.5} />
   </button>
   <button
     class="icon-btn view"

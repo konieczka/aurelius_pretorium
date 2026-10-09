@@ -3,8 +3,9 @@ import { message } from "@tauri-apps/plugin-dialog";
 import type { Scan, Scope } from "./skills";
 import type { Provider } from "./usageStats";
 import { closeUsage } from "./usageView.svelte";
+import { closeAgents } from "./agentsView.svelte";
 
-// The Skills view stands in for this window's panes while open, like Usage (the two take turns). Per window, not saved.
+// The Skills view stands in for this window's panes while open, like Usage and Agents (they take turns). Per window, not saved.
 export const skills = $state({
   open: false,
   scan: null as Scan | null,
@@ -23,7 +24,7 @@ export const skills = $state({
 
 export function toggleSkills() {
   skills.open = !skills.open;
-  if (skills.open) closeUsage();
+  if (skills.open) (closeUsage(), closeAgents());
 }
 export const closeSkills = () => (skills.open = false);
 

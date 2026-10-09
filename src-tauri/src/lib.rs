@@ -7,6 +7,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
+mod agent_config;
 mod skills;
 mod usage;
 
@@ -54,7 +55,7 @@ fn clean_env() -> Vec<(String, String)> {
 }
 
 /// PATH from the user's login shell (Finder-launched apps lack Homebrew, nvm, ...), resolved once.
-fn login_path() -> &'static str {
+pub(crate) fn login_path() -> &'static str {
     static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PATH.get_or_init(|| {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
@@ -602,7 +603,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
