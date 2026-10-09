@@ -161,7 +161,7 @@
     <button class="icon-btn" onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)"><Rows2 size={14} strokeWidth={1.5} /></button>
   </div>
   {#if where}
-    <div class="where" class:foreign={where.foreign} title={(tab.kind === "term" ? tab.cwd : tab.path) + (where.foreign ? "\nNot the folder in the sidebar" : "")}>
+    <div class="where" title={(tab.kind === "term" ? tab.cwd : tab.path) + (where.foreign ? "\nNot the folder in the sidebar" : "")}>
       <span class="seg project">{#if where.git}<FolderGit2 size={12} strokeWidth={1.5} />{:else}<Folder size={12} strokeWidth={1.5} />{/if}{where.project}</span>
       {#if where.wt}<span class="seg" title="Worktree: {repo?.root}"><GitFork size={12} strokeWidth={1.5} />{where.wt}</span>{/if}
       {#if where.branch}<span class="seg" title="Branch"><GitBranch size={12} strokeWidth={1.5} />{where.branch}</span>{/if}
@@ -404,10 +404,6 @@
   .project {
     color: var(--foreground);
     font-weight: 500;
-  }
-  /* Tab from another folder than the sidebar's: the project name carries the warning colour */
-  .foreign .project {
-    color: oklch(0.7 0.17 50);
   }
   .rel {
     min-width: 0;
