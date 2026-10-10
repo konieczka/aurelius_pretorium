@@ -801,6 +801,7 @@ name = "fleet_command"
 version = "0.1.0"
 dependencies = [
  "jsonc-parser",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

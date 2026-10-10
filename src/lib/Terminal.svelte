@@ -96,13 +96,15 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
+
   let { tabId, cwd }: { tabId: string; cwd: string } = $props();
   let el: HTMLDivElement;
 
   $effect(() => {
     const existing = entries.get(tabId);
     if (existing) el.appendChild(existing.host);
-    const e = existing ?? create(tabId, cwd, el);
+    const e = existing ?? create(tabId, untrack(() => cwd), el); // cwd follows `cd`: that mustn't re-run this (and grab focus)
     e.term.focus();
     const ro = new ResizeObserver(() => el.clientWidth && e.fit.fit());
     ro.observe(el);

@@ -17,7 +17,7 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     out: Arc<Mutex<Output>>,
-    cwd: String, // where it started
+    cwd: String, // where it is: starts as the tab's folder, follows `cd` (see `cwd_of`)
     watch: status::Watch,
 }
 
@@ -237,7 +237,7 @@ struct Shell {
     agent: Option<String>, // agent command in the foreground; None when it's the shell itself or another job
     quiet: Option<u64>,    // ms since its last output that wasn't an echo of input (None: none yet)
     title: String,
-    cwd: String, // where the shell started
+    cwd: String, // the shell's working directory now
     busy: bool,
     attention: bool, // the agent rang, or finished, while no window had it on screen
     since: u64,      // ms since the agent came or went, or started or stopped working
@@ -277,6 +277,10 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
         if seen.contains(id) {
             s.watch.seen(now);
         }
+        // Gone shells keep the last one seen.
+        if let Some(cwd) = s.child.process_id().and_then(cwd_of) {
+            s.cwd = cwd;
+        }
         let mut o = s.out.lock().unwrap();
         let quiet = o.active.map(|t| now.saturating_duration_since(t).as_millis() as u64);
         let rang = std::mem::take(&mut o.signals.rang);
@@ -293,6 +297,23 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
         });
     }
     Ok(shells)
+}
+
+/// A process's current working directory: the user may have `cd`'d out of the folder the tab was opened in.
+#[cfg(target_os = "macos")]
+fn cwd_of(pid: u32) -> Option<String> {
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as i32;
+    let n = unsafe { libc::proc_pidinfo(pid as i32, libc::PROC_PIDVNODEPATHINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    if n != size {
+        return None;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr() as *const libc::c_char) };
+    Some(path.to_string_lossy().into_owned()).filter(|p| !p.is_empty())
+}
+#[cfg(not(target_os = "macos"))]
+fn cwd_of(pid: u32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Is the left mouse button physically held right now (regardless of which window has the events)?
@@ -666,6 +687,16 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_a_processs_working_directory() {
+        let dir = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let mut child = std::process::Command::new("/bin/sleep").arg("5").current_dir(&dir).spawn().unwrap();
+        let cwd = super::cwd_of(child.id());
+        child.kill().unwrap();
+        assert_eq!(cwd.as_deref(), dir.to_str());
+        assert_eq!(super::cwd_of(u32::MAX >> 1), None);
+    }
+
     #[test]
     fn recognizes_agents_by_program_or_script() {
         use super::agent_in;
