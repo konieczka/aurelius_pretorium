@@ -73,9 +73,12 @@
     grid-row: 2;
     min-width: 0;
     overflow: auto;
+    /* Room for the scrollbar on both sides, so the column stays centred (and as wide) whether or not it scrolls */
+    scrollbar-gutter: stable both-edges;
   }
   .page {
-    max-width: 980px;
+    box-sizing: border-box; /* like Skills and Agents: --page-width includes the padding */
+    max-width: var(--page-width);
     margin: 0 auto;
     padding: 28px 32px 48px;
   }

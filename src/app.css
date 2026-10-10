@@ -24,6 +24,7 @@
   --r-island: 20px; /* sidebar */
   --r-float: 22px; /* quick pick, dialogs */
   --gap: 8px; /* gutter between planes; doubles as the split handle */
+  --page-width: 1120px; /* column of the full-page views (Fleet, Usage, Skills, Agents, Settings), padding included */
   --blur-chrome: blur(28px) saturate(160%);
   --blur-float: blur(44px) saturate(180%);
 
