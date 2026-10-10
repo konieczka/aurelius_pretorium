@@ -50,16 +50,16 @@ export const app = $state({
 });
 
 const under = (p: string, root: string) => p === root || p.startsWith(root + "/");
-/** The opened folder a path belongs to (deepest match), or its parent dir if none. */
-export const ownerOf = (path: string) =>
-  app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? path.slice(0, path.lastIndexOf("/"));
+/** The opened folder a path belongs to (deepest match); if none, the path itself for a folder, else its parent dir. */
+export const ownerOf = (path: string, dir = false) =>
+  app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? (dir ? path : path.slice(0, path.lastIndexOf("/")));
 const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.path);
-/** Folder a tab belongs to ("" for an unsaved note). */
-export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t)) : "");
+/** Folder a tab belongs to ("" for an unsaved note). A terminal's follows its shell's `cd`. */
+export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t), t.kind === "term") : "");
 /** Folder a tab belongs to, or "" when it's in the current workspace. */
 export function foreignOwner(t: L.Tab) {
   const p = tabPath(t);
-  return !p || under(p, app.workspace) ? "" : ownerOf(p);
+  return !p || under(p, app.workspace) ? "" : tabOwner(t);
 }
 
 /** root = toplevel; main = the main checkout's toplevel when this is a linked worktree. "" root = not a repo. */

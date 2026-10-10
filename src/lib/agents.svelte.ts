@@ -5,6 +5,7 @@ import type { Provider } from "./usageStats";
 
 // Coding agents running in terminals. A term tab's `agent` is the agent its shell last had in the foreground; it's
 // saved with the layout, so a shell started fresh for the tab (app relaunch, workspace reopened) starts it again.
+// Its `cwd` likewise follows the shell's working directory.
 
 /** Agent command (what the backend reports) -> its provider, for the tab's name and icon. */
 export const agentProvider: Record<string, Provider> = { claude: "claude", codex: "codex", agy: "antigravity", grok: "grok", opencode: "opencode" };
@@ -15,7 +16,7 @@ export type Shell = {
   agent: string | null;
   quiet: number | null;
   title: string;
-  cwd: string;
+  cwd: string; // the shell's working directory now
   busy: boolean;
   attention: boolean; // it rang, or finished, while no window had it on screen
   since: number; // ms since the agent came or went, or started or stopped working (as of `polled`)
@@ -52,6 +53,8 @@ async function poll() {
   // Only this workspace's tabs: their agent is saved with the layout (to start it again in a fresh shell).
   for (const t of allTabs()) {
     if (t.kind !== "term" || !(t.id in found)) continue; // no shell yet (tab never shown): keep what was saved
+    // Follow `cd`: the header's project / branch go by it, and a fresh shell for the tab starts where this one was.
+    if (found[t.id].cwd && t.cwd !== found[t.id].cwd) t.cwd = found[t.id].cwd;
     const agent = found[t.id].agent ?? undefined;
     if (agent) starting.delete(t.id);
     else if ((starting.get(t.id) ?? 0) > now) continue;
