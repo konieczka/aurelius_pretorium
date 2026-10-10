@@ -25,7 +25,7 @@
   import Settings from "$lib/Settings.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
+    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -42,12 +42,12 @@
     if (typeof dir === "string") openWorkspace(dir);
   }
 
-  /** Switch the sidebar to another folder/project; open tabs stay. */
+  /** Switch the sidebar to another folder/project; open tabs stay. Folders can be removed from the list here. */
   async function switchFolder() {
     const v = await pick("Open a folder or project", [
       { label: "Open folder…", hint: "⌘O", value: "\0open" },
-      ...app.recent.map((r) => ({ label: r.slice(r.lastIndexOf("/") + 1), detail: r, value: r })),
-    ]);
+      ...app.recent.map((r) => ({ label: r.slice(r.lastIndexOf("/") + 1), detail: r, value: r, removable: true })),
+    ], forgetFolder);
     if (v === "\0open") pickFolder();
     else if (v) openWorkspace(v);
   }

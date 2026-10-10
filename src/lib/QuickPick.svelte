@@ -1,6 +1,7 @@
 <script module lang="ts">
   // VS Code-style quick pick: one instance rendered by the app shell, driven by pick() / prompt().
-  export type Item = { label: string; detail?: string; hint?: string; value: string };
+  // `removable` items get an X (and ⌘⌫) that hands them to pick()'s `remove` and drops them from the list.
+  export type Item = { label: string; detail?: string; hint?: string; value: string; removable?: boolean };
 
   const quick = $state({
     open: false,
@@ -8,19 +9,22 @@
     items: null as Item[] | null, // null = free-text prompt
     value: "", // initial text
     resolve: (_: string | null) => {},
+    remove: (_: string) => {},
   });
 
-  function show(placeholder: string, items: Item[] | null, value = "") {
+  function show(placeholder: string, items: Item[] | null, value = "", remove = (_: string) => {}) {
     quick.resolve(null); // a newer picker replaces any open one
-    return new Promise<string | null>((resolve) => Object.assign(quick, { open: true, placeholder, items, value, resolve }));
+    return new Promise<string | null>((resolve) => Object.assign(quick, { open: true, placeholder, items, value, resolve, remove }));
   }
   /** Resolves to the chosen item's value, or null if dismissed. */
-  export const pick = (placeholder: string, items: Item[]) => show(placeholder, items);
+  export const pick = (placeholder: string, items: Item[], remove?: (value: string) => void) => show(placeholder, items, "", remove);
   /** Resolves to the entered text (trimmed, non-empty), or null if dismissed. */
   export const prompt = (placeholder: string, value = "") => show(placeholder, null, value);
 </script>
 
 <script lang="ts">
+  import { X } from "@lucide/svelte";
+
   let query = $state("");
   $effect(() => {
     if (quick.open) query = quick.value;
@@ -32,13 +36,19 @@
 
   function close(value: string | null) {
     const r = quick.resolve;
-    Object.assign(quick, { open: false, resolve: () => {} });
+    Object.assign(quick, { open: false, resolve: () => {}, remove: () => {} });
     query = "";
     sel = 0;
     r(value);
   }
+  function remove(it: Item) {
+    quick.remove(it.value);
+    quick.items = quick.items!.filter((i) => i !== it);
+    sel = Math.min(sel, Math.max(shown.length - 1, 0));
+  }
   function key(e: KeyboardEvent) {
     if (e.key === "Escape") close(null);
+    else if (e.key === "Backspace" && e.metaKey && shown[sel]?.removable) remove(shown[sel]), e.preventDefault();
     else if (e.key === "ArrowDown") (sel = Math.min(sel + 1, shown.length - 1)), e.preventDefault();
     else if (e.key === "ArrowUp") (sel = Math.max(sel - 1, 0)), e.preventDefault();
     else if (e.key === "Enter") {
@@ -64,11 +74,15 @@
       {#if quick.items}
         <div class="list">
           {#each shown as it, i (it.value)}
-            <button class="item" class:sel={i === sel} onmouseenter={() => (sel = i)} onclick={() => close(it.value)}>
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus (keys go through the input) -->
+            <div class="item" class:sel={i === sel} role="option" aria-selected={i === sel} onmouseenter={() => (sel = i)} onclick={() => close(it.value)}>
               <span class="label">{it.label}</span>
               {#if it.detail}<span class="detail">{it.detail}</span>{/if}
               {#if it.hint}<span class="hint">{it.hint}</span>{/if}
-            </button>
+              {#if it.removable}
+                <button class="icon-btn remove" title="Remove from list (⌘⌫)" onclick={(e) => (e.stopPropagation(), remove(it))}><X size={13} strokeWidth={1.5} /></button>
+              {/if}
+            </div>
           {:else}
             <div class="none">No matches</div>
           {/each}
@@ -131,9 +145,10 @@
   .list {
     max-height: 360px;
     margin-top: 6px;
-    overflow: auto;
+    overflow: hidden auto;
   }
   .item {
+    box-sizing: border-box;
     display: flex;
     align-items: baseline;
     gap: 10px;
@@ -146,6 +161,16 @@
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
+  }
+  .remove {
+    align-self: center;
+    width: 22px;
+    height: 22px;
+    margin: -4px -6px -4px 0;
+    visibility: hidden;
+  }
+  .item.sel .remove {
+    visibility: visible;
   }
   .item.sel {
     background: var(--chip-on);

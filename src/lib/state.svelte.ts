@@ -103,11 +103,20 @@ export const arrangePanes = () => L.equalize(app.root);
 
 const term = (): L.Tab => ({ id: L.uid(), kind: "term", cwd: app.workspace });
 
+// Re-read before changing: another window may have opened or forgotten a folder since this one loaded the list.
+const recentList = () => load<string[]>("recent", app.recent);
+function setRecent(list: string[]) {
+  app.recent = list;
+  store.set("recent", JSON.stringify(list));
+}
+
+/** Stop tracking `path`: it leaves the folder switcher. Its files and any open tabs are untouched. */
+export const forgetFolder = (path: string) => setRecent(recentList().filter((r) => r !== path));
+
 /** Show `path` in the sidebar. Open tabs are untouched. */
 export function openWorkspace(path: string) {
   app.workspace = path;
-  app.recent = [path, ...app.recent.filter((r) => r !== path)].slice(0, 15);
-  store.set("recent", JSON.stringify(app.recent));
+  setRecent([path, ...recentList().filter((r) => r !== path)].slice(0, 15));
   app.selectedDir = path;
   app.creating = null;
   app.selectedPath = "";
