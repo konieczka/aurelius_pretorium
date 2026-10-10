@@ -110,6 +110,60 @@
     }
   }
 
+  // Too many tabs to fit: the strip scrolls sideways. A plain mouse wheel scrolls it too, and the active tab is kept in view.
+  let strip = $state<HTMLElement>();
+  let overflowing = $state(false);
+  $effect(() => {
+    if (!strip) return;
+    const el = strip;
+    const check = () => (overflowing = el.scrollWidth > el.clientWidth);
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    const mo = new MutationObserver(check); // tabs added, closed or renamed
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => (ro.disconnect(), mo.disconnect());
+  });
+  function wheel(e: WheelEvent) {
+    if (!strip || !overflowing || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    strip.scrollLeft += e.deltaY;
+  }
+  // Sideways only: scrollIntoView would also nudge the strip vertically
+  $effect(() => {
+    void pane.tabs.length;
+    const t = strip?.children[pane.active] as HTMLElement | undefined;
+    if (!strip || !t) return;
+    const left = t.offsetLeft, right = left + t.offsetWidth;
+    if (left < strip.scrollLeft) strip.scrollLeft = left;
+    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth;
+  });
+  // The strip is a fixed-height row: overflow-y hidden still lets WebKit scroll it vertically, so pin it to the top
+  const pinTop = (e: Event) => ((e.currentTarget as HTMLElement).scrollTop = 0);
+
+  // Dragging a tab near either end of the strip scrolls it, faster the closer to the edge
+  const EDGE = 40, MAX_SPEED = 14;
+  let edgeSpeed = 0, edgeFrame = 0;
+  function dragEdge(e: DragEvent) {
+    if (!strip || !overflowing) return;
+    const r = strip.getBoundingClientRect();
+    const fromLeft = e.clientX - r.left, fromRight = r.right - e.clientX;
+    edgeSpeed = fromLeft < EDGE ? -MAX_SPEED * (1 - fromLeft / EDGE) : fromRight < EDGE ? MAX_SPEED * (1 - fromRight / EDGE) : 0;
+    if (edgeSpeed && !edgeFrame) edgeFrame = requestAnimationFrame(edgeStep);
+  }
+  function edgeStep() {
+    if (!strip || !edgeSpeed || !app.dragging) return stopEdge();
+    strip.scrollLeft += edgeSpeed;
+    edgeFrame = requestAnimationFrame(edgeStep);
+  }
+  function stopEdge() {
+    cancelAnimationFrame(edgeFrame);
+    edgeSpeed = edgeFrame = 0;
+  }
+  function leaveStrip(e: DragEvent) {
+    if (!strip?.contains(e.relatedTarget as Node)) stopEdge();
+  }
+  $effect(() => stopEdge);
+
   // Run an action against this pane rather than whichever was focused before.
   const here = (fn: () => void) => () => ((app.focused = pane.id), fn());
 </script>
@@ -118,6 +172,7 @@
 <section class="pane slab" class:focused={app.focused === pane.id} onfocusin={() => (app.focused = pane.id)} onpointerdown={() => (app.focused = pane.id)}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="bar" ondragover={(e) => e.preventDefault()} ondrop={(e) => drop(e, pane.tabs.length)}>
+    <div class="tabs" class:overflowing bind:this={strip} onwheel={wheel} onscroll={pinTop} ondragover={dragEdge} ondragleave={leaveStrip} ondrop={stopEdge}>
     {#each pane.tabs as t, i (t.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
       <div
@@ -154,7 +209,7 @@
         <button class="icon-btn x" onclick={(e) => (e.stopPropagation(), closeTab(t.id))} aria-label="Close tab"><X size={13} strokeWidth={1.5} /></button>
       </div>
     {/each}
-    <span class="spacer"></span>
+    </div>
     <button class="icon-btn" onclick={here(newNote)} title="New note (⌘N)"><NotebookPen size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><SquareTerminal size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
@@ -228,8 +283,30 @@
     flex: none;
     padding: 0 6px;
     background: var(--slab-head);
+  }
+  /* The tabs scroll on their own, under a thin scrollbar along the bottom edge, so the pane actions stay put.
+     Tabs sit at the top of a full-height strip so they don't shift when the scrollbar appears */
+  .tabs {
+    position: relative; /* offsetParent for the tabs */
+    display: flex;
+    align-items: flex-start;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding-top: 6px;
     overflow-x: auto;
-    scrollbar-width: none;
+    overflow-y: hidden;
+  }
+  .tabs::-webkit-scrollbar {
+    height: 6px;
+  }
+  /* The scrollbar takes the bottom 6px and clips what's under it: lift the tabs and tuck the gold tick in above it */
+  .tabs.overflowing {
+    padding-top: 2px;
+  }
+  .focused .tabs.overflowing .tab.active::before {
+    bottom: -3px;
   }
   /* Tabs are chips, not notches */
   .tab {
@@ -242,6 +319,7 @@
     border-radius: var(--r-control);
     color: var(--muted-foreground);
     font-size: 12.5px;
+    flex: none;
     cursor: pointer;
     white-space: nowrap;
     transition: color var(--dur-quick) var(--ease-standard), background-color var(--dur-quick) var(--ease-standard);
@@ -347,9 +425,6 @@
     .agent.working :global(svg) {
       filter: drop-shadow(0 0 2px color-mix(in oklch, var(--gold) 70%, transparent));
     }
-  }
-  .spacer {
-    flex: 1;
   }
   .bar > .icon-btn {
     align-self: center;
