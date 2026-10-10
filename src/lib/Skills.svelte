@@ -121,7 +121,7 @@
 
 <svelte:window onkeydown={onKey} onfocus={reload} />
 
-<div class="skills">
+<div class="skills slab">
   <div class="page">
     <header>
       <div>
@@ -308,13 +308,13 @@
 
 <style>
   /* Header fixed; the list and the selected skill scroll on their own */
+  /* Plane 2: a slab, like the panes it stands in for */
   .skills {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--background);
   }
   .page {
     display: flex;

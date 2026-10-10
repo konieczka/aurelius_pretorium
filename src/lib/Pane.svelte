@@ -115,7 +115,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<section class="pane" class:focused={app.focused === pane.id} onfocusin={() => (app.focused = pane.id)} onpointerdown={() => (app.focused = pane.id)}>
+<section class="pane slab" class:focused={app.focused === pane.id} onfocusin={() => (app.focused = pane.id)} onpointerdown={() => (app.focused = pane.id)}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="bar" ondragover={(e) => e.preventDefault()} ondrop={(e) => drop(e, pane.tabs.length)}>
     {#each pane.tabs as t, i (t.id)}
@@ -214,25 +214,32 @@
     height: 100%;
     min-width: 0;
     min-height: 0;
+    transition: box-shadow var(--dur-base) var(--ease-standard);
+  }
+  /* Gold = focus: the focused slab gets a gold hairline and halo, its active tab a gold tick */
+  .pane.focused {
+    box-shadow: var(--sh-slab), var(--ring-focus);
   }
   .bar {
     display: flex;
-    align-items: stretch;
-    gap: 2px;
-    height: 34px;
+    align-items: center;
+    gap: 3px;
+    height: 40px;
     flex: none;
-    padding: 0 4px 0 0;
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
+    padding: 0 6px;
+    background: var(--slab-head);
     overflow-x: auto;
     scrollbar-width: none;
   }
+  /* Tabs are chips, not notches */
   .tab {
     position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 4px 0 12px;
+    height: 28px;
+    padding: 0 4px 0 10px;
+    border-radius: var(--r-control);
     color: var(--muted-foreground);
     font-size: 12.5px;
     cursor: pointer;
@@ -240,31 +247,25 @@
     transition: color var(--dur-quick) var(--ease-standard), background-color var(--dur-quick) var(--ease-standard);
   }
   .tab:hover {
+    background: var(--hover);
     color: var(--foreground);
   }
   .tab.active {
-    background: var(--surface);
+    background: var(--chip-on);
+    box-shadow: var(--sh-chip);
     color: var(--foreground);
-    box-shadow: inset 1px 0 0 var(--border), inset -1px 0 0 var(--border);
   }
-  .tab.active::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -1px;
-    height: 1px;
-    background: var(--surface);
-  }
-  /* Gold = focus: only the focused pane's active tab gets the bar */
   .focused .tab.active::before {
     content: "";
     position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
+    left: 50%;
+    bottom: -6px;
+    width: 18px;
     height: 2px;
+    margin-left: -9px;
+    border-radius: 9999px;
     background: var(--gold);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--gold) 70%, transparent);
   }
   .name {
     max-width: 200px;
@@ -362,6 +363,7 @@
   .x {
     width: 20px;
     height: 20px;
+    border-radius: 6px;
     visibility: hidden;
   }
   .tab:hover .x,
@@ -372,11 +374,11 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    height: 24px;
+    height: 26px;
     flex: none;
-    padding: 0 10px;
+    padding: 0 14px;
     background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     color: var(--muted-foreground);
     font-size: 11.5px;
     white-space: nowrap;
@@ -422,10 +424,10 @@
   }
   .zone {
     position: absolute;
-    inset: 6px;
+    inset: 8px;
     background: var(--gold-soft);
     border: 1px solid var(--gold-ring);
-    border-radius: var(--radius-md);
+    border-radius: var(--r-control);
     pointer-events: none;
     transition: all var(--dur-quick) var(--ease-out-quint);
   }

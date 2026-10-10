@@ -59,37 +59,47 @@
   .col {
     flex-direction: column;
   }
+  /* No overflow clip here: the slab's shadow and focus halo spill into the gutter */
   .cell {
     position: relative;
     min-width: 0;
     min-height: 0;
-    overflow: hidden;
   }
-  .divider {
-    flex: none;
-    background: var(--border);
-    transition: background-color var(--dur-quick) var(--ease-standard);
-  }
-  .row > .divider {
-    width: 1px;
-    cursor: col-resize;
-  }
-  .col > .divider {
-    height: 1px;
-    cursor: row-resize;
-  }
-  /* 1px line with a wider invisible grab area */
+  /* The gutter between slabs is the handle; a pill shows on hover */
   .divider {
     position: relative;
     z-index: 5;
+    flex: none;
+  }
+  .row > .divider {
+    width: var(--gap);
+    cursor: col-resize;
+  }
+  .col > .divider {
+    height: var(--gap);
+    cursor: row-resize;
   }
   .divider::after {
     content: "";
     position: absolute;
-    inset: -3px;
-  }
-  .divider:hover,
-  .divider:active {
+    top: 50%;
+    left: 50%;
+    border-radius: 9999px;
     background: var(--gold);
+    opacity: 0;
+    transform: translate(-50%, -50%);
+    transition: opacity var(--dur-quick) var(--ease-standard);
+  }
+  .row > .divider::after {
+    width: 3px;
+    height: 40px;
+  }
+  .col > .divider::after {
+    width: 40px;
+    height: 3px;
+  }
+  .divider:hover::after,
+  .divider:active::after {
+    opacity: 1;
   }
 </style>

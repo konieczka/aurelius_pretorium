@@ -112,10 +112,22 @@
 
   const up = () => (press = null);
 
+  // The bar is the title bar (overlay style): it leaves room for the traffic lights, except in full screen where
+  // macOS hides them.
+  let fullscreen = $state(false);
+  $effect(() => {
+    const check = () => win.isFullscreen().then((f) => (fullscreen = f), () => {});
+    check();
+    const off = win.onResized(check);
+    return () => void off.then((f) => f());
+  });
+
   const focus = (el: HTMLInputElement) => (el.focus(), el.select());
 </script>
 
-<div class="bar" class:merging={ws.incoming} role="tablist" tabindex="-1" bind:this={bar} onpointermove={move} onpointerup={up} onlostpointercapture={up}>
+<!-- Plane 0: drawn straight on the field. Bare field (data-tauri-drag-region, which doesn't reach children) drags the
+     window; the workspace tabs and the tools sit in glass capsules. -->
+<div class="bar" class:merging={ws.incoming} class:fullscreen data-tauri-drag-region role="tablist" tabindex="-1" bind:this={bar} onpointermove={move} onpointerup={up} onlostpointercapture={up}>
   <!-- Always here, before the logo, so toggling the sidebar doesn't shift the tabs -->
   <button
     class="icon-btn"
@@ -125,7 +137,9 @@
   >
     {#if app.sidebarOpen}<PanelLeftClose size={14} strokeWidth={1.5} />{:else}<PanelLeft size={14} strokeWidth={1.5} />{/if}
   </button>
-  <span class="mark"></span>
+  <span class="mark" data-tauri-drag-region></span>
+  <span class="wordmark" data-tauri-drag-region>Pretorium</span>
+  <div class="wss glass">
   {#each ws.open as id (id)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
@@ -163,7 +177,10 @@
   {/each}
   {#if ws.incoming}<div class="ws ghost"><span class="name">{nameOf(ws.incoming)}</span></div>{/if}
   <button class="icon-btn" onclick={add} title="New workspace, or open one"><Plus size={14} strokeWidth={1.5} /></button>
-  <button class="icon-btn arrange" onclick={arrangePanes} title="Auto-arrange panes" aria-label="Auto-arrange panes">
+  </div>
+  <span class="drag" data-tauri-drag-region></span>
+  <div class="dock glass">
+  <button class="icon-btn" onclick={arrangePanes} title="Auto-arrange panes" aria-label="Auto-arrange panes">
     <LayoutGrid size={14} strokeWidth={1.5} />
   </button>
   <button
@@ -178,6 +195,7 @@
     {#if running}<span class="count">{running}</span>{/if}
     {#if waiting}<span class="waiting"></span>{/if}
   </button>
+  <span class="sep"></span>
   <button
     class="icon-btn view"
     class:on={skills.open}
@@ -208,6 +226,7 @@
   >
     <Gauge size={14} strokeWidth={1.5} />
   </button>
+  <span class="sep"></span>
   <button
     class="icon-btn awake"
     class:on={awake.on}
@@ -221,29 +240,33 @@
   <button class="icon-btn" onclick={cycleTheme} title="Theme: {theme.mode}" aria-label="Theme: {theme.mode}. Click to change.">
     <ThemeIcon size={14} strokeWidth={1.5} />
   </button>
+  </div>
 </div>
 
 <style>
   .bar {
     grid-column: 1 / -1;
     display: flex;
-    align-items: stretch;
-    gap: 2px;
-    height: 32px;
-    padding: 0 6px;
-    background: var(--sidebar);
-    border-bottom: 1px solid var(--border-strong);
+    align-items: center;
+    gap: 6px;
+    height: 44px;
+    /* Room for the traffic lights (trafficLightPosition in tauri.conf.json / newWindow) */
+    padding: 0 0 0 78px;
+    margin: 0 calc(-1 * var(--gap));
+    padding-right: var(--gap);
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bar.fullscreen {
+    padding-left: var(--gap);
   }
   /* Another window's workspace is dragged over this bar: release merges it in, where the ghost tab is */
-  .bar.merging {
+  .bar.merging .wss {
     background: var(--gold-soft);
-    box-shadow: inset 0 0 0 1px var(--gold-ring);
+    box-shadow: var(--sh-chrome), inset 0 0 0 1px var(--gold-ring);
   }
   .ghost {
-    margin: 4px 0;
     border: 1px dashed var(--gold-ring);
-    border-radius: 6px;
     color: var(--foreground);
     animation: ghost-in var(--dur-quick, 120ms) var(--ease-standard, ease-out);
   }
@@ -253,19 +276,56 @@
       transform: translateY(-4px);
     }
   }
-  .bar > .icon-btn,
   .bar > .mark {
-    align-self: center;
+    width: 19px;
+    height: 19px;
+    margin-left: 4px;
   }
-  .bar > .mark {
-    margin: 0 6px 0 4px;
+  .wordmark {
+    margin: 0 8px 0 2px;
+    font-family: var(--font-cinzel);
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    white-space: nowrap;
   }
-  .arrange {
-    margin-left: auto;
+  /* Glass capsules: workspace tabs on the left, tools on the right */
+  .wss,
+  .dock {
+    display: flex;
+    align-items: center;
+    flex: none;
+    gap: 2px;
+    height: 34px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    border-radius: 13px;
+  }
+  .wss .icon-btn,
+  .dock .icon-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .drag {
+    flex: 1;
+    align-self: stretch;
+    min-width: 24px;
+  }
+  .sep {
+    flex: none;
+    width: 1px;
+    height: 16px;
+    margin: 0 3px;
+    background: var(--chrome-edge);
+  }
+  :global(:root:not(.dark)) .sep {
+    background: oklch(var(--shadow-tint) / 0.12);
   }
   .view.on {
-    background: var(--sidebar-accent);
-    color: var(--sidebar-foreground);
+    background: var(--chip-on);
+    box-shadow: var(--sh-chip);
+    color: var(--foreground);
   }
   /* Lit while keeping the Mac awake: an amber flame with a slow, soft pulse */
   .awake {
@@ -306,27 +366,40 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     max-width: 220px;
-    padding: 0 6px 0 12px;
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0 4px 0 12px;
+    border-radius: var(--r-control);
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: 12.5px;
     cursor: default;
+    transition: color var(--dur-quick) var(--ease-standard), background-color var(--dur-quick) var(--ease-standard);
   }
-  .ws:hover,
-  .ws.active {
+  .ws:hover {
+    background: var(--hover);
     color: var(--foreground);
   }
-  /* Gold marks the active workspace, like the sidebar tools */
-  .ws.active::after {
+  /* The active workspace is a raised chip with a gold lamp */
+  .ws.active {
+    background: var(--chip-on);
+    box-shadow: var(--sh-chip);
+    color: var(--foreground);
+  }
+  .ws.active::before {
     content: "";
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 0;
-    height: 2px;
+    flex: none;
+    width: 5px;
+    height: 5px;
+    margin-left: -2px;
     border-radius: 9999px;
     background: var(--gold);
+    box-shadow: 0 0 8px var(--gold);
+  }
+  /* Only workspace: no close button, so keep the right padding even */
+  .ws:not(:has(.x)) {
+    padding-right: 12px;
   }
   .name {
     overflow: hidden;
@@ -337,7 +410,7 @@
     width: 140px;
     padding: 1px 4px;
     border: 1px solid var(--gold-ring);
-    border-radius: 4px;
+    border-radius: 6px;
     background: var(--background);
     color: var(--foreground);
     font: inherit;
@@ -378,10 +451,11 @@
   .fleet {
     position: relative;
     display: inline-flex;
-    gap: 4px;
-    width: auto;
-    min-width: 26px;
-    padding: 0 6px;
+    gap: 5px;
+    width: auto !important;
+    min-width: 28px;
+    padding: 0 8px;
+    color: var(--foreground);
   }
   .count {
     font-size: 11.5px;
@@ -395,9 +469,12 @@
     height: 6px;
     border-radius: 9999px;
     background: oklch(0.7 0.17 50);
-    box-shadow: 0 0 0 1.5px var(--sidebar);
+    box-shadow: none;
   }
   .x {
+    width: 20px !important;
+    height: 20px !important;
+    border-radius: 6px;
     opacity: 0;
   }
   .ws:hover .x,
