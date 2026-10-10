@@ -795,8 +795,9 @@ fn allow_asset(app: AppHandle, path: String) -> Res<()> {
 
 /// Quit for real, once a window has dealt with "quit-requested" (asked about working agents, saved unsaved edits).
 /// Every shell is ended the way closing its tab does it, so no agent outlives the app running headless.
+/// `restart`: start again afterwards (an update was just installed).
 #[tauri::command]
-async fn quit(app: AppHandle, ptys: State<'_, Ptys>) -> Res<()> {
+async fn quit(app: AppHandle, ptys: State<'_, Ptys>, restart: Option<bool>) -> Res<()> {
     let sessions: Vec<Session> = ptys.sessions.lock().unwrap().drain().map(|(_, s)| s).collect();
     blocking(move || {
         for t in sessions.into_iter().map(|s| std::thread::spawn(move || hang_up(s))).collect::<Vec<_>>() {
@@ -805,6 +806,9 @@ async fn quit(app: AppHandle, ptys: State<'_, Ptys>) -> Res<()> {
         Ok(())
     })
     .await?;
+    if restart == Some(true) {
+        app.restart();
+    }
     app.exit(0);
     Ok(())
 }
@@ -823,6 +827,7 @@ fn app_url(url: &tauri::Url) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard").on_navigation(|_, url| app_url(url)).build())
         // Default macOS menu binds ⌘W to Close Window; we want it for tabs.
         .menu(|h| {
@@ -831,7 +836,8 @@ pub fn run() {
             Menu::with_items(h, &[
                 &Submenu::with_items(h, "Pretorium", true, &[
                     // Our own Quit: the windows get to ask about agents still working and keep unsaved edits first.
-                    &P::about(h, None, None)?, &P::separator(h)?, &P::hide(h, None)?, &item("quit", "Quit Pretorium", "CmdOrCtrl+Q")?,
+                    &P::about(h, None, None)?, &MenuItem::with_id(h, "check-updates", "Check for Updates…", true, None::<&str>)?,
+                    &P::separator(h)?, &P::hide(h, None)?, &item("quit", "Quit Pretorium", "CmdOrCtrl+Q")?,
                 ])?,
                 &Submenu::with_items(h, "Edit", true, &[
                     &P::undo(h, None)?, &P::redo(h, None)?, &P::separator(h)?,
@@ -845,13 +851,15 @@ pub fn run() {
             ])
         })
         .on_menu_event(|h, e| {
-            if e.id().as_ref() == "quit" {
-                // One window runs the quit (the focused one, else any); with none left there's nothing to ask about.
+            if let id @ ("quit" | "check-updates") = e.id().as_ref() {
+                // One window runs these (the focused one, else any); with none left there's nothing to ask about.
                 let windows = h.webview_windows();
                 let w = windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next());
+                let event = if id == "quit" { "quit-requested" } else { "check-updates" };
                 match w {
-                    Some(w) => { let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), "quit-requested", ()); }
-                    None => h.exit(0),
+                    Some(w) => { let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), event, ()); }
+                    None if id == "quit" => h.exit(0),
+                    None => {}
                 }
                 return;
             }

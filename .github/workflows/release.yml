@@ -1,0 +1,39 @@
+# Builds a universal macOS app, signs the update with the updater key and puts it in a draft GitHub release together
+# with latest.json (what installed apps poll). Publishing the draft is what ships it: drafts aren't "latest".
+#
+# Run it from the Actions tab once `version` in src-tauri/tauri.conf.json is bumped. Needs the repository secret
+# TAURI_SIGNING_PRIVATE_KEY (contents of ~/.tauri/pretorium.key), plus TAURI_SIGNING_PRIVATE_KEY_PASSWORD if the
+# key has one.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tauriScript: bun run tauri
+          args: --target universal-apple-darwin
+          tagName: v__VERSION__
+          releaseName: Pretorium v__VERSION__
+          releaseBody: Download Pretorium.dmg below. Installed copies update themselves.
+          releaseDraft: true

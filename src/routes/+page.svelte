@@ -10,6 +10,7 @@
   import { hasPreview } from "$lib/media";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
+  import { initUpdates } from "$lib/updates";
   import { watchAgents } from "$lib/agents.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
@@ -28,6 +29,7 @@
   } from "$lib/state.svelte";
 
   initWorkspaces();
+  initUpdates();
   warmUsage();
   $effect(save);
   $effect(watchAgents);

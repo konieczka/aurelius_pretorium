@@ -44,6 +44,16 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Command a fleet of coding agents",
-    "copyright": "© 2026 Michał Konieczka"
+    "copyright": "© 2026 Michał Konieczka",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4MDgyMzMzQTIxMEM3NjAKUldSZ3h4Q2lNeU1JZUNxMWZBZEhFN3BDd0tKYTUwbk11Y1U2QTZHSkRZdFZjUnBZOWdXMlhNUzkK",
+      "endpoints": [
+        "https://github.com/konieczka/aurelius_pretorium/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
   }
 }

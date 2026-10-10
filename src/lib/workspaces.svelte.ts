@@ -335,25 +335,29 @@ function parkAll() {
   for (const id of ws.open) park(id);
 }
 
-/** Quitting or closing the last window stops every shell: ask first if agents are still working. */
-async function confirmQuit() {
+/** Quitting (or restarting, or closing the last window) stops every shell: ask first if agents are still working. */
+async function confirmQuit(restart = false) {
   const n = Object.values(shells.all).filter((s) => s.busy).length;
   if (!n) return true;
-  return ask(`${n === 1 ? "An agent is" : `${n} agents are`} still working. Quitting stops ${n === 1 ? "it" : "them"}.`, {
-    title: "Quit Pretorium?", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel",
+  const [verb, Verb] = restart ? ["Restarting", "Restart"] : ["Quitting", "Quit"];
+  return ask(`${n === 1 ? "An agent is" : `${n} agents are`} still working. ${verb} stops ${n === 1 ? "it" : "them"}.`, {
+    title: `${Verb} Pretorium?`, kind: "warning", okLabel: Verb, cancelLabel: "Cancel",
   });
 }
 
 /** ⌘Q (the backend's Quit sends it to one window): ask, have every window store its workspaces, then quit. */
-async function quit() {
-  if (!(await confirmQuit())) return;
+async function quit(restart = false) {
+  if (!(await confirmQuit(restart))) return;
   let left = (await getAllWebviewWindows()).length;
   await new Promise<void>((done) => {
     const timeout = setTimeout(done, 1500); // a window that doesn't answer mustn't keep the app from quitting
     listen("parked", () => --left || (clearTimeout(timeout), done())).then(() => emit("park"));
   });
-  invoke("quit");
+  invoke("quit", { restart });
 }
+
+/** Restart into a freshly installed update, the way ⌘Q quits (agents asked about, unsaved edits kept). */
+export const restartApp = () => quit(true);
 
 /** Start this window's workspaces. If what's stored can't be used, offer to start over instead of a blank window. */
 export async function initWorkspaces() {
@@ -436,7 +440,7 @@ function init() {
   });
   // Reload (⌘R): the editors go, their unsaved text comes back from storage.
   window.addEventListener("pagehide", () => leaving || parkAll());
-  getCurrentWebviewWindow().listen("quit-requested", quit);
+  getCurrentWebviewWindow().listen("quit-requested", () => quit());
   listen("park", () => (leaving || parkAll(), emit("parked")));
 
   // Reopen the other windows from last session (skipped when it's just the main window reloading).
