@@ -408,9 +408,14 @@ pub fn skill_create(project: String, scope: Scope, dir: Option<String>, name: St
 
 fn delete(home: &Path, project: &Path, paths: &[String]) -> Res<()> {
     let editable = editable(home, project);
-    for p in paths {
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup(); // the same folder listed twice (project = home) would fail the second time
+    for p in &paths {
         let p = Path::new(p);
-        if !p.parent().is_some_and(|d| editable.iter().any(|e| e == d)) {
+        // An entry *in* a skills folder: "<skills>/.." has that folder as its parent too, and is its owner's whole folder.
+        let entry = p.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
+        if !entry || !p.parent().is_some_and(|d| editable.iter().any(|e| e == d)) {
             return Err(format!("{} isn't in a skills folder", p.display()));
         }
     }
@@ -555,6 +560,7 @@ mod tests {
 
         // Deleting unlinks links and refuses paths outside skills folders.
         assert!(delete(&home, &proj, &[s(&proj.join("src/x"))]).is_err());
+        assert!(delete(&home, &proj, &[s(&home.join(".codex/skills/.."))]).is_err());
         let gone = s(&home.join(".gemini/config/skills/git-commit"));
         delete(&home, &proj, &[gone.clone()]).unwrap();
         assert!(std::fs::symlink_metadata(&gone).is_err());

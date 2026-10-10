@@ -1,6 +1,6 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { save } from "@tauri-apps/plugin-dialog";
+  import { ask, message, save } from "@tauri-apps/plugin-dialog";
   import { EditorView, basicSetup } from "codemirror";
   import { Compartment, Transaction } from "@codemirror/state";
   import { keymap } from "@codemirror/view";
@@ -8,13 +8,14 @@
   import { HighlightStyle, LanguageDescription, syntaxHighlighting } from "@codemirror/language";
   import { languages } from "@codemirror/language-data";
   import { tags as t } from "@lezer/highlight";
-  import { marked } from "marked";
-  import DOMPurify from "dompurify";
+  import { blockLinks, renderMarkdown } from "./markdown";
   import { app } from "./state.svelte";
   import { findTab } from "./layout";
 
   // Editors outlive their component so unsaved edits survive tab moves.
-  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment; wrap?: Compartment };
+  // stamp: the file's version on disk the text was read or saved at (see open_file); eol: its line breaks, kept on save.
+  type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment; wrap?: Compartment; stamp?: string | null; eol: string };
+  type Opened = { text: string; stamp: string | null };
   const entries = new Map<string, Entry>();
 
   export function disposeEditor(tabId: string) {
@@ -23,36 +24,68 @@
     entries.delete(tabId);
   }
 
-  export async function saveEditor(tabId: string) {
+  /** The editor's text as it goes to disk: with the file's own line breaks (CodeMirror keeps lines, not breaks). */
+  const textOf = (e: Entry) => e.view!.state.doc.sliceString(0, undefined, e.eol);
+  const eolOf = (text: string) => (text.includes("\r\n") ? "\r\n" : "\n");
+  const CHANGED_ON_DISK = "changed on disk"; // write_file's refusal to overwrite a newer file
+
+  /** Save the tab's text. Returns whether it was written. */
+  export async function saveEditor(tabId: string): Promise<boolean> {
     const e = entries.get(tabId);
-    if (!e?.view) return;
+    if (!e?.view) return false;
     // The tab's path, not e.path: the file may have been moved since it was opened.
     const f = findTab(app.root, tabId);
     const tab = f?.pane.tabs[f.index];
-    if (tab?.kind !== "file") return;
+    if (tab?.kind !== "file") return false;
     const untitled = !tab.path;
-    if (untitled) {
-      const p = await save({ defaultPath: `${app.workspace}/Untitled.md` });
-      if (!p) return;
-      tab.path = p;
+    const path = tab.path || (await save({ defaultPath: `${app.workspace}/Untitled.md` }));
+    if (!path) return false;
+    const content = textOf(e);
+    const write = (expect: string | null | undefined) => invoke<string | null>("write_file", { path, content, expect: expect ?? null });
+    try {
+      // An agent (or anything else) may have changed the file since it was read: don't silently overwrite that.
+      e.stamp = await write(untitled ? null : e.stamp).catch(async (err) => {
+        if (String(err) !== CHANGED_ON_DISK) throw err;
+        const name = path.slice(path.lastIndexOf("/") + 1);
+        if (!(await ask(`“${name}” was changed on disk since you opened it. Overwrite it with your version?`, { title: "File changed on disk", kind: "warning", okLabel: "Overwrite", cancelLabel: "Cancel" }))) throw null;
+        return write(null);
+      });
+    } catch (err) {
+      if (err !== null) message(`Couldn't save ${path}:\n${err}`, { kind: "error" });
+      return false;
     }
-    await invoke("write_file", { path: tab.path, content: e.view.state.doc.toString() });
+    if (untitled) tab.path = path; // only once it's really there
     app.dirty[tabId] = false;
     app.gitVersion++;
     if (untitled) {
       app.treeVersion++;
-      languageFor(tab.path)?.then((support) => e.lang && e.view?.dispatch({ effects: e.lang.reconfigure(support) }));
+      languageFor(path)?.then((support) => e.lang && e.view?.dispatch({ effects: e.lang.reconfigure(support) }));
     }
+    return true;
   }
 
-  /** Pick up external changes (agents, git pull/checkout) when the tab has no unsaved edits. */
-  export async function reloadEditor(tabId: string, path: string) {
+  /** Pick up external changes (agents, git pull/checkout) when the tab has no unsaved edits. `stamp`: the version
+   * on disk if the caller already knows it (unchanged = nothing to do). */
+  export async function reloadEditor(tabId: string, path: string, stamp?: string | null) {
     const e = entries.get(tabId);
-    if (!e?.view || app.dirty[tabId]) return;
-    const disk = await invoke<string>("read_file", { path }).catch(() => null);
-    const cur = e.view?.state.doc.toString();
-    if (disk === null || cur === undefined || disk === cur || app.dirty[tabId]) return;
-    e.view!.dispatch({ changes: { from: 0, to: cur.length, insert: disk }, annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] });
+    if (!e?.view || app.dirty[tabId] || !path) return;
+    if (stamp !== undefined && stamp === e.stamp) return;
+    const disk = await invoke<Opened>("open_file", { path }).catch(() => null);
+    if (!disk || !e.view || app.dirty[tabId]) return;
+    e.stamp = disk.stamp;
+    e.eol = eolOf(disk.text);
+    const cur = textOf(e);
+    if (disk.text === cur) return;
+    e.view.dispatch({ changes: { from: 0, to: e.view.state.doc.length, insert: disk.text }, annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] });
+  }
+
+  /** Has the file changed on disk since the editor read it? Checked every few seconds for the tab on screen: git
+   * status doesn't change when an already modified file is edited again, or for ignored files. */
+  async function checkDisk(tabId: string, path: string) {
+    const e = entries.get(tabId);
+    if (!e?.view || !path || e.stamp === undefined) return;
+    const stamp = await invoke<string | null>("file_stamp", { path }).catch(() => undefined);
+    if (stamp) reloadEditor(tabId, path, stamp);
   }
 
   /** Conflict navigation for the toolbar; returns the 1-based index. */
@@ -113,13 +146,17 @@
   export const languageFor = (path: string) => LanguageDescription.matchFilename(languages, path)?.load();
 
   function create(tabId: string, path: string, wrap: boolean): Entry {
-    const e: Entry = { host: document.createElement("div") };
+    const e: Entry = { host: document.createElement("div"), eol: "\n" };
     e.host.className = "editor-host selectable"; // code, or the read error
     entries.set(tabId, e);
     const draft = drafts.get(tabId);
     drafts.delete(tabId);
-    (draft !== undefined ? Promise.resolve(draft) : !path ? Promise.resolve("") : invoke<string>("read_file", { path })).then(
-      (doc) => {
+    const blank: Opened = { text: draft ?? "", stamp: null };
+    (draft !== undefined || !path ? Promise.resolve(blank) : invoke<Opened>("open_file", { path })).then(
+      ({ text: doc, stamp }) => {
+        // A carried-over draft was read at some unknown version: saving it checks nothing (as before drafts had stamps).
+        e.stamp = draft !== undefined ? null : stamp;
+        e.eol = eolOf(doc);
         const lang = (e.lang = new Compartment());
         const wrapping = (e.wrap = new Compartment());
         e.view = new EditorView({
@@ -185,18 +222,23 @@
     reloadEditor(tabId, untrack(() => path));
   });
 
+  $effect(() => {
+    const t = setInterval(() => document.visibilityState === "visible" && checkDisk(tabId, path), 2000);
+    return () => clearInterval(t);
+  });
+
   // Conflict toolbar: shown while the file has markers, or is still unmerged in git.
   const conflicts = $derived(app.conflicts[tabId] ?? 0);
   const unmerged = $derived(!!git.status?.files.some((f) => f.kind === "conflict" && `${git.root}/${f.path}` === path));
   let at = $state(0);
   async function resolved() {
-    if (app.dirty[tabId]) await saveEditor(tabId);
+    if (app.dirty[tabId] && !(await saveEditor(tabId))) return;
     markResolved(path);
   }
 
   // Sanitizing is mandatory: preview HTML runs in a window that can call the pty commands.
   const svg = $derived(isSvg(path));
-  const html = $derived(preview && !svg && app.dirty[tabId] !== undefined ? DOMPurify.sanitize(marked.parse(text(tabId), { async: false })) : "");
+  const html = $derived(preview && !svg && app.dirty[tabId] !== undefined ? renderMarkdown(text(tabId)) : "");
   // SVG preview draws the editor's text (unsaved edits too) as an <img>: scripts inside never run.
   const svgSrc = $derived(preview && svg && app.dirty[tabId] !== undefined ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text(tabId))}` : "");
 </script>
@@ -218,7 +260,7 @@
   {#if svgSrc}{#key svgSrc}<Media {path} src={svgSrc} />{/key}{/if}
 {:else if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="md md-content selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
+  <div class="md md-content selectable" onclick={blockLinks}>
     {@html html}
   </div>
 {/if}

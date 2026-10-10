@@ -117,3 +117,17 @@ test("restore into the only, empty pane", () => {
   restore(root, { ...m, pane: "gone" });
   expect(ids(root)).toEqual(["a"]);
 });
+
+test("stored layouts are checked before use", async () => {
+  const { isRoot, isMinimized } = await import("./layout");
+  const root = rootWith(pane([t("a"), { id: "f", kind: "file", path: "/x" }]));
+  split(root, root.children[0].id, "col", t("b"));
+  expect(isRoot(JSON.parse(JSON.stringify(root)))).toBe(true);
+  expect(isRoot(null)).toBe(false);
+  expect(isRoot(pane())).toBe(false); // the root is always a split
+  expect(isRoot({ ...root, children: [] })).toBe(false);
+  expect(isRoot({ ...root, sizes: [] })).toBe(false);
+  expect(isRoot(rootWith(pane([{ id: "x", kind: "term" } as unknown as Tab])))).toBe(false);
+  expect(isMinimized({ tab: t("a"), pane: "p", index: 0 })).toBe(true);
+  expect(isMinimized({ tab: t("a"), pane: "p" })).toBe(false);
+});

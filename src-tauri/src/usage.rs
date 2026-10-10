@@ -392,6 +392,12 @@ fn opencode_rows(f: &mut FileScan, db: &Path) {
 
 static CACHE: Mutex<Option<HashMap<PathBuf, FileScan>>> = Mutex::new(None);
 
+/// `s` with its first letter in upper case (by character: API strings can be empty or start with any letter).
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or_else(String::new, |first| first.to_uppercase().chain(c).collect())
+}
+
 /// The Grok CLI: where its installer puts it, else whatever the login shell's PATH finds.
 fn grok_cmd() -> std::process::Command {
     let local = home().join(".grok/bin/grok");
@@ -422,6 +428,7 @@ fn collect(since: i64) -> Vec<Row> {
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = guard.get_or_insert_with(HashMap::new);
     let mut rows = Vec::new();
+    let mut grok_answers = true; // one `grok usage` that hangs means the CLI is stuck: don't wait on it once per session
     for (provider, path) in sources() {
         let Ok(meta) = std::fs::metadata(&path) else { continue };
         // For the databases `len` is a stamp (both files' sizes and the newest mtime), so any write changes it.
@@ -447,7 +454,15 @@ fn collect(since: i64) -> Vec<Row> {
             } else if provider == Provider::Grok {
                 // The session changed: ask the CLI for its totals again.
                 f.session = path.parent().and_then(|p| p.file_name()).map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                let Ok(out) = grok_cmd().args(["usage", &f.session]).output() else { continue };
+                if !grok_answers {
+                    continue;
+                }
+                let mut cmd = grok_cmd();
+                cmd.args(["usage", &f.session]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+                let Some(out) = output_within(cmd, Duration::from_secs(10)) else {
+                    grok_answers = false;
+                    continue;
+                };
                 grok_rows(f, &serde_json::from_slice(&out.stdout).unwrap_or(Value::Null));
                 f.len = meta.len();
             } else {
@@ -543,7 +558,7 @@ fn parse_claude(v: &Value) -> Result<Vec<Limit>, String> {
                     ("session", _) => "Session".to_string(),
                     ("weekly", Some(m)) => format!("Weekly · {m}"),
                     ("weekly", None) => "Weekly".to_string(),
-                    (g, _) => g[..1].to_uppercase() + &g[1..],
+                    (g, _) => capitalized(g),
                 };
                 Some(limit(label, l["percent"].as_f64()?, &l["resets_at"], window))
             })
@@ -719,7 +734,7 @@ fn parse_antigravity(v: &Value) -> Option<Vec<Limit>> {
                 w if !w.is_empty() => (w, None),
                 _ => ("Limit", None),
             };
-            let window = window[..1].to_uppercase() + &window[1..];
+            let window = capitalized(window);
             out.push(Limit {
                 provider: Provider::Antigravity,
                 label: if name.is_empty() { window } else { format!("{window} · {name}") },
@@ -734,7 +749,7 @@ fn parse_antigravity(v: &Value) -> Option<Vec<Limit>> {
 }
 
 /// Run `cmd` (stdout/stderr piped), giving up and killing it after `limit`.
-fn output_within(mut cmd: std::process::Command, limit: Duration) -> Option<std::process::Output> {
+pub(crate) fn output_within(mut cmd: std::process::Command, limit: Duration) -> Option<std::process::Output> {
     let child = cmd.spawn().ok()?;
     let pid = child.id();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -794,6 +809,14 @@ pub async fn usage_limits(force: bool) -> Res<Limits> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capitalizes_any_string_from_an_api() {
+        assert_eq!(capitalized("weekly"), "Weekly");
+        assert_eq!(capitalized(""), "");
+        assert_eq!(capitalized("ółty"), "Ółty");
+        assert_eq!(capitalized("ß"), "SS");
+    }
 
     #[test]
     fn parses_timestamps() {

@@ -176,3 +176,20 @@ export function restore(root: Split, m: Minimized): Pane {
   if (!m.near || !parentOf(root, m.near.node)) return dockRoot(root, m.tab, side);
   return split(root, m.near.node, side === "left" || side === "right" ? "row" : "col", m.tab, side === "left" || side === "top");
 }
+
+// Shape checks for layouts read back from storage: a bad one (an older or newer version's, a broken write) is
+// dropped for a fresh layout instead of breaking the window.
+type Raw = any;
+const str = (v: unknown) => typeof v === "string";
+export const isTab = (t: Raw): t is Tab =>
+  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : (t.kind === "file" || t.kind === "diff") && str(t.path));
+function isNode(n: Raw): n is LNode {
+  if (n?.type === "pane") return str(n.id) && Array.isArray(n.tabs) && n.tabs.every(isTab) && Number.isInteger(n.active);
+  return (
+    n?.type === "split" && str(n.id) && (n.dir === "row" || n.dir === "col") &&
+    Array.isArray(n.children) && n.children.length > 0 && n.children.every(isNode) &&
+    Array.isArray(n.sizes) && n.sizes.length === n.children.length && n.sizes.every((s: unknown) => typeof s === "number" && s >= 0)
+  );
+}
+export const isRoot = (n: unknown): n is Split => isNode(n) && (n as LNode).type === "split";
+export const isMinimized = (m: Raw): m is Minimized => !!m && isTab(m.tab) && str(m.pane) && Number.isInteger(m.index);

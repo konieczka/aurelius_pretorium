@@ -374,18 +374,8 @@ fn write_checked(path: &Path, base: &str, content: &str) -> Res<()> {
         return Err(format!("{} changed on disk since it was loaded. Reloaded it; check it and save again.", path.display()));
     }
     let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let dir = real.parent().ok_or("No parent folder")?;
-    std::fs::create_dir_all(dir).map_err(err)?;
-    let name = real.file_name().ok_or("No file name")?.to_string_lossy();
-    let tmp = dir.join(format!(".{name}.fleet-tmp"));
-    std::fs::write(&tmp, content).map_err(err)?;
-    if let Ok(m) = std::fs::metadata(&real) {
-        let _ = std::fs::set_permissions(&tmp, m.permissions());
-    }
-    std::fs::rename(&tmp, &real).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        err(e)
-    })
+    std::fs::create_dir_all(real.parent().ok_or("No parent folder")?).map_err(err)?;
+    crate::write_atomic(&real, content.as_bytes()).map_err(err)
 }
 
 fn load(s: Spec) -> File {

@@ -13,7 +13,9 @@ mod status;
 mod usage;
 
 struct Session {
-    writer: Box<dyn Write + Send>,
+    // Input for the shell, written by its own thread: a write blocks while the program in the terminal isn't
+    // reading, and that must not hold up the main thread (every window) or the sessions lock.
+    input: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     out: Arc<Mutex<Output>>,
@@ -63,25 +65,35 @@ pub(crate) fn login_path() -> &'static str {
     static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PATH.get_or_init(|| {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        // ponytail: an rc file that blocks on input would hang this once; no timeout.
-        std::process::Command::new(shell)
-            .args(["-ilc", r#"printf "__FC__%s__FC__" "$PATH""#])
+        let mut cmd = std::process::Command::new(shell);
+        cmd.args(["-ilc", r#"printf "__FC__%s__FC__" "$PATH""#])
             .env_clear()
             .envs(clean_env())
             .stdin(std::process::Stdio::null())
-            .output()
-            .ok()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        // An rc file that hangs (waits on input, a slow network mount) mustn't hold up every git call forever.
+        usage::output_within(cmd, std::time::Duration::from_secs(5))
             .and_then(|o| String::from_utf8_lossy(&o.stdout).split("__FC__").nth(1).map(String::from))
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".into())
     })
 }
 
+/// Run blocking work (file system, child processes) on the blocking pool: sync commands run on the main thread,
+/// where a big file or a slow disk would freeze every window.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Res<T> + Send + 'static) -> Res<T> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
+}
+
 /// Run git with an argument list (no shell). Async + blocking pool so pull/push never freeze the UI.
 #[tauri::command]
 async fn git(cwd: String, args: Vec<String>) -> Res<String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let out = std::process::Command::new("git")
+            // Opening a folder runs status in the background: a repo's own config must not get to run commands
+            // through it (a downloaded repo's core.fsmonitor runs on every `git status`).
+            .args(["-c", "core.fsmonitor=false"])
             .args(&args)
             .current_dir(cwd)
             .env_clear()
@@ -100,7 +112,6 @@ async fn git(cwd: String, args: Vec<String>) -> Res<String> {
         }
     })
     .await
-    .map_err(err)?
 }
 
 /// Attach `on_data` to the tab's shell, spawning it if it doesn't exist yet. Re-attaching replays recent output first.
@@ -149,7 +160,16 @@ fn pty_open(
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().map_err(err)?;
-    let writer = pair.master.take_writer().map_err(err)?;
+    let mut writer = pair.master.take_writer().map_err(err)?;
+    let (input, typed) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        // Ends when the session is dropped (its sender with it) or the shell is gone.
+        for data in typed {
+            if writer.write_all(&data).is_err() {
+                break;
+            }
+        }
+    });
     let out = Arc::new(Mutex::new(Output { chan: Some(on_data), ..Default::default() }));
     let sink = out.clone();
     std::thread::spawn(move || {
@@ -185,16 +205,16 @@ fn pty_open(
         }
     });
 
-    sessions.insert(id, Session { writer, master: pair.master, child, out, cwd, watch: Default::default() });
+    sessions.insert(id, Session { input, master: pair.master, child, out, cwd, watch: Default::default() });
     Ok(true)
 }
 
 #[tauri::command]
 fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
-    let mut map = ptys.sessions.lock().unwrap();
-    let s = map.get_mut(&id).ok_or("no such pty")?;
+    let map = ptys.sessions.lock().unwrap();
+    let s = map.get(&id).ok_or("no such pty")?;
     s.out.lock().unwrap().input = Some(Instant::now());
-    s.writer.write_all(data.as_bytes()).map_err(err)
+    s.input.send(data.into_bytes()).map_err(|_| "the shell has exited".into())
 }
 
 #[tauri::command]
@@ -209,9 +229,42 @@ fn pty_resize(ptys: State<Ptys>, id: String, cols: u16, rows: u16) -> Res<()> {
 
 #[tauri::command]
 fn pty_kill(ptys: State<Ptys>, id: String) {
-    if let Some(mut s) = ptys.sessions.lock().unwrap().remove(&id) {
-        let _ = s.child.kill();
+    if let Some(s) = ptys.sessions.lock().unwrap().remove(&id) {
+        std::thread::spawn(move || hang_up(s)); // waits on the processes: off the main thread
     }
+}
+
+/// End a shell and whatever runs in its terminal, the way closing a terminal window does: SIGHUP to the shell's
+/// process group and the foreground job's (an agent), SIGKILL to what's still there after a grace period, then reap.
+/// Signalling the shell alone isn't enough: one killed before it passes the hangup on leaves the agent running
+/// headless (the reader thread's copy of the terminal keeps it open, so the kernel never hangs it up).
+fn hang_up(mut s: Session) {
+    #[cfg(unix)]
+    {
+        let groups: Vec<i32> = [s.child.process_id().map(|p| p as i32), s.master.process_group_leader()]
+            .into_iter()
+            .flatten()
+            .filter(|&g| g > 1)
+            .collect();
+        let signal = |sig: i32| groups.iter().filter(|&&g| unsafe { libc::killpg(g, sig) } == 0).count();
+        signal(libc::SIGHUP);
+        let grace = Instant::now();
+        let gone = loop {
+            if matches!(s.child.try_wait(), Ok(Some(_))) && signal(0) == 0 {
+                break true;
+            }
+            if grace.elapsed() > std::time::Duration::from_secs(3) {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        if !gone {
+            signal(libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = s.child.kill();
+    let _ = s.child.wait();
 }
 
 /// Coding agent CLIs a terminal can run, by the command that starts them (Antigravity's is `agy`).
@@ -399,27 +452,107 @@ struct Entry {
 }
 
 #[tauri::command]
-fn list_dir(path: String) -> Res<Vec<Entry>> {
-    let mut out: Vec<Entry> = std::fs::read_dir(path)
-        .map_err(err)?
-        .filter_map(|e| e.ok())
-        .map(|e| Entry {
-            name: e.file_name().to_string_lossy().into_owned(),
-            is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
-        })
-        .collect();
-    out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-    Ok(out)
+async fn list_dir(path: String) -> Res<Vec<Entry>> {
+    blocking(move || {
+        let mut out: Vec<Entry> = std::fs::read_dir(path)
+            .map_err(err)?
+            .filter_map(|e| e.ok())
+            .map(|e| Entry {
+                name: e.file_name().to_string_lossy().into_owned(),
+                is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            })
+            .collect();
+        out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        Ok(out)
+    })
+    .await
 }
 
-#[tauri::command]
-fn read_file(path: String) -> Res<String> {
+/// Text files bigger than this aren't opened: the whole text crosses the IPC and lands in an editor.
+const MAX_TEXT: u64 = 16 * 1024 * 1024;
+
+fn read_text(path: &str) -> Res<String> {
+    let len = std::fs::metadata(path).map_err(err)?.len();
+    if len > MAX_TEXT {
+        return Err(format!("This file is too large to open here ({} MB).", len / (1024 * 1024)));
+    }
     std::fs::read_to_string(path).map_err(err)
 }
 
+/// A file's version on disk (modified time and size), to tell whether someone else changed it since it was read.
+fn stamp_of(path: &str) -> Option<String> {
+    let m = std::fs::metadata(path).ok()?;
+    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(format!("{}:{}", t.as_nanos(), m.len()))
+}
+
 #[tauri::command]
-fn write_file(path: String, content: String) -> Res<()> {
-    std::fs::write(path, content).map_err(err)
+async fn read_file(path: String) -> Res<String> {
+    blocking(move || read_text(&path)).await
+}
+
+#[derive(serde::Serialize)]
+struct Opened {
+    text: String,
+    stamp: Option<String>,
+}
+
+/// A file for the editor: its text, and its version (passed back to `write_file`, which refuses to overwrite a newer one).
+#[tauri::command]
+async fn open_file(path: String) -> Res<Opened> {
+    blocking(move || {
+        let stamp = stamp_of(&path);
+        Ok(Opened { text: read_text(&path)?, stamp })
+    })
+    .await
+}
+
+/// The file's version on disk now (None: it's gone), for the editor to notice changes made elsewhere.
+#[tauri::command]
+async fn file_stamp(path: String) -> Option<String> {
+    blocking(move || Ok(stamp_of(&path))).await.ok().flatten()
+}
+
+/// What `write_file` reports when the file changed on disk since `expect` (the editor asks before overwriting).
+const CHANGED_ON_DISK: &str = "changed on disk";
+
+/// Write `content` to `path` and return its new version. With `expect` (the version the text was read at), a file
+/// changed since then is left alone and this fails with CHANGED_ON_DISK. The text goes to a temporary file that
+/// replaces the old one, so a crash mid-write can't leave it cut short.
+#[tauri::command]
+async fn write_file(path: String, content: String, expect: Option<String>) -> Res<Option<String>> {
+    blocking(move || {
+        if let Some(expect) = expect {
+            if stamp_of(&path).is_some_and(|now| now != expect) {
+                return Err(CHANGED_ON_DISK.into());
+            }
+        }
+        write_atomic(Path::new(&path), content.as_bytes()).map_err(err)?;
+        Ok(stamp_of(&path))
+    })
+    .await
+}
+
+/// Replace `path` with `bytes` via a temporary file beside it, keeping its permissions and following a symlink
+/// (the link stays; its target is replaced).
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = path.parent().ok_or_else(|| std::io::Error::other("no parent folder"))?;
+    let name = path.file_name().ok_or_else(|| std::io::Error::other("no file name"))?.to_string_lossy();
+    let tmp = dir.join(format!(".{name}.pretorium-{}", std::process::id()));
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        if let Ok(m) = std::fs::metadata(&path) {
+            f.set_permissions(m.permissions())?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[tauri::command]
@@ -434,18 +567,25 @@ fn create_dir(path: String) -> Res<()> {
 }
 
 #[tauri::command]
-fn move_path(from: String, to: String) -> Res<()> {
-    // fs::rename silently replaces an existing file on Unix.
-    // ponytail: exists-check then rename is racy; fine for a single-user editor.
-    if std::path::Path::new(&to).exists() {
-        return Err(format!("{to} already exists"));
-    }
-    std::fs::rename(from, to).map_err(err)
+async fn move_path(from: String, to: String) -> Res<()> {
+    blocking(move || {
+        // fs::rename silently replaces an existing file on Unix.
+        // ponytail: exists-check then rename is racy; fine for a single-user editor.
+        if std::path::Path::new(&to).exists() {
+            return Err(format!("{to} already exists"));
+        }
+        std::fs::rename(from, to).map_err(err)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn copy_path(from: String, dir: String) -> Res<String> {
+    blocking(move || copy_into(from, dir)).await
 }
 
 /// Copy a file or folder into `dir`, Finder-style: "a.txt", then "a copy.txt", "a copy 2.txt"... Returns the new path.
-#[tauri::command]
-fn copy_path(from: String, dir: String) -> Res<String> {
+fn copy_into(from: String, dir: String) -> Res<String> {
     let src = Path::new(&from);
     let name = src.file_name().ok_or("nothing to copy")?.to_string_lossy().into_owned();
     // Folders and dotfiles have no extension to keep at the end.
@@ -575,15 +715,17 @@ fn holding_dir(app: &AppHandle) -> Res<PathBuf> {
 /// Recoverable delete. Returns the held path (undo = move_path back), or None when the item had to
 /// go straight to the system Trash (different volume than the holding area) and can't be undone here.
 #[tauri::command]
-fn trash_path(app: AppHandle, path: String) -> Res<Option<String>> {
-    match hold(Path::new(&path), &holding_dir(&app)?) {
+async fn trash_path(app: AppHandle, path: String) -> Res<Option<String>> {
+    let dir = holding_dir(&app)?;
+    blocking(move || match hold(Path::new(&path), &dir) {
         Ok(p) => Ok(Some(p.to_string_lossy().into_owned())),
         Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
             to_system_trash(Path::new(&path)).map_err(err)?;
             Ok(None)
         }
         Err(e) => Err(err(e)),
-    }
+    })
+    .await
 }
 
 /// Last session's undo history is gone, so its held items go to the system Trash (never deleted outright).
@@ -638,17 +780,58 @@ fn force_reload(w: &tauri::WebviewWindow) {
     let _ = w.reload();
 }
 
+/// Let the webview load `path` over the asset protocol (images, video, 3D models), whose scope starts empty: the app
+/// shows files it was asked to, not anything on disk a script might fetch. A .gltf's textures and buffers sit beside it.
+#[tauri::command]
+fn allow_asset(app: AppHandle, path: String) -> Res<()> {
+    let p = Path::new(&path);
+    let scope = app.asset_protocol_scope();
+    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gltf")) {
+        scope.allow_directory(p.parent().ok_or("no folder")?, true).map_err(err)
+    } else {
+        scope.allow_file(p).map_err(err)
+    }
+}
+
+/// Quit for real, once a window has dealt with "quit-requested" (asked about working agents, saved unsaved edits).
+/// Every shell is ended the way closing its tab does it, so no agent outlives the app running headless.
+#[tauri::command]
+async fn quit(app: AppHandle, ptys: State<'_, Ptys>) -> Res<()> {
+    let sessions: Vec<Session> = ptys.sessions.lock().unwrap().drain().map(|(_, s)| s).collect();
+    blocking(move || {
+        for t in sessions.into_iter().map(|s| std::thread::spawn(move || hang_up(s))).collect::<Vec<_>>() {
+            let _ = t.join();
+        }
+        Ok(())
+    })
+    .await?;
+    app.exit(0);
+    Ok(())
+}
+
+/// Windows only ever show the app itself. A link or form in previewed markdown (a repo's README) must not be able to
+/// navigate one to a remote page, which would then run inside the app's window.
+fn app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" | "about" => true,
+        "http" | "https" => matches!(url.host_str(), Some("tauri.localhost")) || (cfg!(dev) && url.host_str() == Some("localhost")),
+        _ => false,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard").on_navigation(|_, url| app_url(url)).build())
         // Default macOS menu binds ⌘W to Close Window; we want it for tabs.
         .menu(|h| {
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
             let item = |id: &str, text: &str, accel: &str| MenuItem::with_id(h, id, text, true, Some(accel));
             Menu::with_items(h, &[
                 &Submenu::with_items(h, "Pretorium", true, &[
-                    &P::about(h, None, None)?, &P::separator(h)?, &P::hide(h, None)?, &P::quit(h, None)?,
+                    // Our own Quit: the windows get to ask about agents still working and keep unsaved edits first.
+                    &P::about(h, None, None)?, &P::separator(h)?, &P::hide(h, None)?, &item("quit", "Quit Pretorium", "CmdOrCtrl+Q")?,
                 ])?,
                 &Submenu::with_items(h, "Edit", true, &[
                     &P::undo(h, None)?, &P::redo(h, None)?, &P::separator(h)?,
@@ -662,6 +845,16 @@ pub fn run() {
             ])
         })
         .on_menu_event(|h, e| {
+            if e.id().as_ref() == "quit" {
+                // One window runs the quit (the focused one, else any); with none left there's nothing to ask about.
+                let windows = h.webview_windows();
+                let w = windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next());
+                match w {
+                    Some(w) => { let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), "quit-requested", ()); }
+                    None => h.exit(0),
+                }
+                return;
+            }
             let Some(w) = h.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) else { return };
             match e.id().as_ref() {
                 "reload" => { let _ = w.reload(); }
@@ -679,7 +872,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, write_file, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -729,6 +922,40 @@ mod tests {
     }
 
     #[test]
+    fn atomic_writes_keep_mode_and_links_and_stamps_see_changes() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("fc-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("run.sh");
+        std::fs::write(&file, "old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = base.join("link.sh");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        let path = file.to_str().unwrap();
+        let before = super::stamp_of(path).unwrap();
+
+        super::write_atomic(&link, b"new text").unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new text");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_ne!(super::stamp_of(path).unwrap(), before);
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 2); // no temp file left behind
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn windows_only_navigate_within_the_app() {
+        let ok = |u: &str| super::app_url(&u.parse().unwrap());
+        assert!(ok("tauri://localhost/"));
+        assert!(ok("http://tauri.localhost/index.html"));
+        assert!(!ok("https://evil.example/"));
+        assert!(!ok("http://tauri.localhost.evil.example/"));
+        assert!(!ok("file:///etc/passwd"));
+        assert!(!ok("data:text/html,hi"));
+    }
+
+    #[test]
     fn copy_picks_free_names_and_recurses() {
         let base = std::env::temp_dir().join(format!("fc-copy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -738,9 +965,9 @@ mod tests {
         let file = base.join("src/sub/a.txt").to_string_lossy().into_owned();
         let sub = base.join("src/sub").to_string_lossy().into_owned();
         let sub_dir = sub.clone();
-        assert!(super::copy_path(file.clone(), sub_dir.clone()).unwrap().ends_with("a copy.txt"));
-        assert!(super::copy_path(file, sub_dir).unwrap().ends_with("a copy 2.txt"));
-        let copied = super::copy_path(sub, dir).unwrap();
+        assert!(super::copy_into(file.clone(), sub_dir.clone()).unwrap().ends_with("a copy.txt"));
+        assert!(super::copy_into(file, sub_dir).unwrap().ends_with("a copy 2.txt"));
+        let copied = super::copy_into(sub, dir).unwrap();
         assert!(copied.ends_with("sub copy"));
         assert_eq!(std::fs::read_to_string(format!("{copied}/a copy 2.txt")).unwrap(), "hi");
         std::fs::remove_dir_all(&base).unwrap();

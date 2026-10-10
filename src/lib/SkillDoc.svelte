@@ -2,8 +2,7 @@
   import { untrack } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { Compartment } from "@codemirror/state";
-  import { marked } from "marked";
-  import DOMPurify from "dompurify";
+  import { blockLinks, renderMarkdown } from "./markdown";
   import { SquareArrowOutUpRight } from "@lucide/svelte";
   import { aurelius, languageFor } from "./Editor.svelte";
   import { openFile } from "./state.svelte";
@@ -24,7 +23,7 @@
   const editing = $derived(skills.mode === "edit" && !readOnly);
   const loaded = $derived(skills.saved[file] !== undefined);
   // Sanitizing is mandatory: the HTML runs in a window that can call the pty commands.
-  const html = $derived(!editing && text !== undefined ? DOMPurify.sanitize(marked.parse(body(text), { async: false })) : "");
+  const html = $derived(!editing && text !== undefined ? renderMarkdown(body(text)) : "");
 
   let host = $state<HTMLDivElement>();
   let view: EditorView | undefined;
@@ -84,7 +83,7 @@
     <p class="muted">Loading…</p>
   {:else}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="md md-content selectable" onclick={(ev) => (ev.target as HTMLElement).closest("a") && ev.preventDefault()}>
+    <div class="md md-content selectable" onclick={blockLinks}>
       {#if html.trim()}{@html html}{:else}<p class="muted">Nothing below the frontmatter yet.</p>{/if}
     </div>
   {/if}

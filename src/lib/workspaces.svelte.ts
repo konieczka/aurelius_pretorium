@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cursorPosition, getCurrentWindow, LogicalPosition, Window } from "@tauri-apps/api/window";
-import { emitTo } from "@tauri-apps/api/event";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getAllWebviewWindows, getCurrentWebviewWindow, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
@@ -8,6 +8,7 @@ import { activate as activateTab, allTabs, app, dispose, load, openWorkspace, re
 import { focusTerm } from "./Terminal.svelte";
 import { closeFleet } from "./fleetView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
+import { shells } from "./agents.svelte";
 import { cssHex } from "./theme.svelte";
 
 // A workspace is a named arrangement of panes and tabs, plus the folder its sidebar shows.
@@ -23,8 +24,30 @@ type Meta = { id: string; name: string };
 type Layout = { folder: string; root: L.Split; focused: string; minimized?: L.Minimized[]; drafts?: Record<string, string> };
 type Win = { open: string[]; active: string };
 
+// Storage is read back defensively: anything malformed is dropped rather than breaking the window.
+const loadMeta = () => {
+  const all = load<unknown>("workspaces", []);
+  return Array.isArray(all) ? all.filter((m): m is Meta => typeof m?.id === "string" && typeof m?.name === "string") : [];
+};
+function loadLayout(id: string): Layout | null {
+  const l = load<Partial<Layout> | null>("ws:" + id, null);
+  if (!l || !L.isRoot(l.root)) return null;
+  return {
+    folder: typeof l.folder === "string" ? l.folder : "",
+    root: l.root,
+    focused: typeof l.focused === "string" ? l.focused : "",
+    minimized: Array.isArray(l.minimized) ? l.minimized.filter(L.isMinimized) : [],
+    drafts: l.drafts && typeof l.drafts === "object" ? l.drafts : undefined,
+  };
+}
+function loadWin(key: string): Win | null {
+  const w = load<Partial<Win> | null>(key, null);
+  if (!w || !Array.isArray(w.open)) return null;
+  return { open: w.open.filter((id) => typeof id === "string"), active: typeof w.active === "string" ? w.active : "" };
+}
+
 export const ws = $state({
-  all: load<Meta[]>("workspaces", []),
+  all: loadMeta(),
   open: [] as string[],
   active: "",
   incoming: "", // workspace being dragged over this window's bar (another window's tear-off): drop merges it here
@@ -38,9 +61,13 @@ const snapshot = (): Layout => ({ folder: app.workspace, root: app.root, focused
 const tabsOf = (l: Layout) => [...L.panes(l.root).flatMap((p) => p.tabs), ...(l.minimized ?? []).map((m) => m.tab)];
 export const nameOf = (id: string) => ws.all.find((m) => m.id === id)?.name ?? "";
 
+// This window is going away (closed, reloaded, quitting) and has put its workspaces in storage with their unsaved
+// edits (parkAll): from here on nothing may overwrite that.
+let leaving = false;
+
 /** Persist the active workspace and this window's tabs (run as an effect: re-runs on any layout change). */
 export function save() {
-  if (!ws.active) return;
+  if (!ws.active || leaving) return;
   store.set("ws:" + ws.active, JSON.stringify(snapshot()));
   store.set("win:" + win.label, JSON.stringify({ open: ws.open, active: ws.active } satisfies Win));
 }
@@ -49,7 +76,7 @@ export function save() {
 export function ownerWindow(id: string) {
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
-    if (k.startsWith("win:") && k !== "win:" + win.label && load<Win | null>(k, null)?.open.includes(id)) return k.slice(4);
+    if (k.startsWith("win:") && k !== "win:" + win.label && loadWin(k)?.open.includes(id)) return k.slice(4);
   }
   return "";
 }
@@ -58,7 +85,7 @@ export function ownerWindow(id: string) {
 export function activate(id: string) {
   if (id === ws.active) return;
   if (ws.active) held.set(ws.active, snapshot()), save();
-  const l = held.get(id) ?? load<Layout | null>("ws:" + id, null) ?? { folder: app.workspace, root: L.rootWith(L.pane()), focused: "" };
+  const l = held.get(id) ?? loadLayout(id) ?? { folder: app.workspace, root: L.rootWith(L.pane()), focused: "" };
   held.delete(id);
   for (const [tab, text] of Object.entries(l.drafts ?? {})) queueDraft(tab, text);
   if (!ws.open.includes(id)) ws.open.push(id);
@@ -75,7 +102,7 @@ export function activate(id: string) {
  * (another window's, which saves it on every change, or a closed one's). */
 export function tabsIn(id: string): L.Tab[] {
   if (id === ws.active) return allTabs();
-  const l = held.get(id) ?? load<Layout | null>("ws:" + id, null);
+  const l = held.get(id) ?? loadLayout(id);
   return l ? tabsOf(l) : [];
 }
 
@@ -130,15 +157,19 @@ function addTo(l: Layout, tab: L.Tab) {
   p.active = p.tabs.length - 1;
 }
 
-/** Hand `tab` to workspace `id`, wherever it is: active or in the background here, open in another window, or closed. */
-function deliver(id: string, tab: L.Tab) {
+/** Hand `tab` to workspace `id`, wherever it is: active or in the background here, open in another window, or closed.
+ * `draft`: the tab's unsaved editor text, which goes with it. */
+function deliver(id: string, tab: L.Tab, draft?: string) {
+  const here = id === ws.active || held.has(id);
+  if (here && draft !== undefined) queueDraft(tab.id, draft);
   if (id === ws.active) return addTo(snapshot(), tab);
   const h = held.get(id);
   if (h) return addTo(h, tab), store.set("ws:" + id, JSON.stringify(h)); // held ones are saved only when left
   const other = ownerWindow(id);
-  if (other) return void emitTo(other, "adopt-tab", { id, tab });
-  const l = load<Layout | null>("ws:" + id, null) ?? { folder: tab.kind === "term" ? tabOwner(tab) : "", root: L.rootWith(L.pane()), focused: "" };
+  if (other) return void emitTo(other, "adopt-tab", { id, tab, draft });
+  const l = loadLayout(id) ?? { folder: tab.kind === "term" ? tabOwner(tab) : "", root: L.rootWith(L.pane()), focused: "" };
   addTo(l, tab);
+  if (draft !== undefined) l.drafts = { ...l.drafts, [tab.id]: draft };
   store.set("ws:" + id, JSON.stringify(l));
 }
 
@@ -148,10 +179,11 @@ export function moveTabTo(tabId: string, to: string) {
   const f = L.findTab(app.root, tabId);
   if (!f) return;
   const tab = $state.snapshot(f.pane.tabs[f.index]) as L.Tab;
+  const draft = tab.kind === "file" ? draftOf(tab.id) : undefined; // unsaved edits go with it
   L.closeTab(app.root, tabId);
   if (!L.panes(app.root).some((p) => p.id === app.focused)) app.focused = L.panes(app.root)[0].id;
   dispose(tab, false);
-  if (to) return deliver(to, tab);
+  if (to) return deliver(to, tab, draft);
   const id = L.uid();
   let n = 1;
   while (ws.all.some((m) => m.name === `Workspace ${n}`)) n++;
@@ -162,6 +194,7 @@ export function moveTabTo(tabId: string, to: string) {
   held.set(id, l);
   store.set("ws:" + id, JSON.stringify(l));
   ws.open.push(id);
+  if (draft !== undefined) queueDraft(tab.id, draft);
 }
 
 /** Persist `id` with its unsaved editor text, so whichever window shows it next gets both. */
@@ -176,9 +209,10 @@ function park(id: string) {
 
 /** Take `id` out of this window. Its shells keep running and unsaved edits are kept for when it's shown again. */
 function release(id: string) {
-  const tabs = park(id);
   const i = ws.open.indexOf(id);
+  // Switch away first: leaving a workspace saves it (without drafts), which would overwrite what park stores.
   if (id === ws.active) activate(ws.open[i + 1] ?? ws.open[i - 1]);
+  const tabs = park(id);
   held.delete(id);
   ws.open.splice(ws.open.indexOf(id), 1);
   for (const t of tabs) dispose(t, false);
@@ -193,7 +227,7 @@ export async function closeWorkspace(id: string) {
 export async function deleteWorkspace(id: string) {
   if (ownerWindow(id)) return message(`“${nameOf(id)}” is open in another window. Delete it from there.`);
   if (!(await ask(`Delete workspace “${nameOf(id)}”? Its terminals will be closed and unsaved changes discarded.`, { kind: "warning" }))) return;
-  const l = id === ws.active ? snapshot() : (held.get(id) ?? load<Layout | null>("ws:" + id, null));
+  const l = id === ws.active ? snapshot() : (held.get(id) ?? loadLayout(id));
   if (ws.open.includes(id)) {
     if (ws.open.length === 1) createWorkspace();
     release(id);
@@ -278,7 +312,10 @@ function newWindow(label: string, opts: { x?: number; y?: number; width: number;
     titleBarStyle: "overlay", hiddenTitle: true, trafficLightPosition: new LogicalPosition(18, 22),
     ...opts,
   });
-  w.once("tauri://error", (e) => message(`Couldn't open the window: ${JSON.stringify(e.payload)}`, { kind: "error" }));
+  w.once("tauri://error", (e) => {
+    store.remove("win:" + label); // else its workspaces stay "open in another window" that doesn't exist
+    message(`Couldn't open the window: ${JSON.stringify(e.payload)}`, { kind: "error" });
+  });
   return w;
 }
 
@@ -290,27 +327,75 @@ export function moveWorkspace(id: string, to: string) {
   ws.open.splice(j, 0, id);
 }
 
-export function initWorkspaces() {
+/** Put every workspace of this window in storage with its unsaved edits (they reopen with them): the window is going
+ * away, closed, reloaded or quitting. */
+function parkAll() {
+  save();
+  leaving = true;
+  for (const id of ws.open) park(id);
+}
+
+/** Quitting or closing the last window stops every shell: ask first if agents are still working. */
+async function confirmQuit() {
+  const n = Object.values(shells.all).filter((s) => s.busy).length;
+  if (!n) return true;
+  return ask(`${n === 1 ? "An agent is" : `${n} agents are`} still working. Quitting stops ${n === 1 ? "it" : "them"}.`, {
+    title: "Quit Pretorium?", kind: "warning", okLabel: "Quit", cancelLabel: "Cancel",
+  });
+}
+
+/** ⌘Q (the backend's Quit sends it to one window): ask, have every window store its workspaces, then quit. */
+async function quit() {
+  if (!(await confirmQuit())) return;
+  let left = (await getAllWebviewWindows()).length;
+  await new Promise<void>((done) => {
+    const timeout = setTimeout(done, 1500); // a window that doesn't answer mustn't keep the app from quitting
+    listen("parked", () => --left || (clearTimeout(timeout), done())).then(() => emit("park"));
+  });
+  invoke("quit");
+}
+
+/** Start this window's workspaces. If what's stored can't be used, offer to start over instead of a blank window. */
+export async function initWorkspaces() {
+  try {
+    init();
+  } catch (e) {
+    console.error(e);
+    const reset = await ask(`Pretorium couldn't restore your workspaces (${e}).\n\nReset them? Your files and folders aren't touched; open tabs and layouts are.`, {
+      title: "Couldn't restore workspaces", kind: "error", okLabel: "Reset", cancelLabel: "Quit",
+    });
+    if (!reset) return invoke("quit");
+    for (const k of Object.keys(localStorage)) if (k === "workspaces" || /^(ws|win|merge):/.test(k)) store.remove(k);
+    location.reload();
+  }
+}
+
+function init() {
   // First run with workspaces: the single shared layout becomes "Workspace 1".
   if (!ws.all.length) {
     const id = L.uid();
     const folder = store.get("workspace") ?? "";
-    const root = load<L.Split | null>("layout", load<L.Split | null>("layout:" + folder, null)) ?? L.rootWith(L.pane());
+    const legacy = load<unknown>("layout", load<unknown>("layout:" + folder, null));
+    const root = L.isRoot(legacy) ? legacy : L.rootWith(L.pane());
     ws.all = [{ id, name: "Workspace 1" }];
     saveMeta();
     store.set("ws:" + id, JSON.stringify({ folder, root, focused: "" }));
     store.set("win:main", JSON.stringify({ open: [id], active: id }));
   }
 
-  const w = load<Win | null>("win:" + win.label, null);
+  const w = loadWin("win:" + win.label);
   const open = (w?.open ?? []).filter((id) => ws.all.some((m) => m.id === id) && !ownerWindow(id));
   if (!open.length) {
     const free = ws.all.find((m) => !ownerWindow(m.id));
-    if (!free) return createWorkspace();
-    open.push(free.id);
+    if (free) open.push(free.id);
   }
-  ws.open = open;
-  activate(w && open.includes(w.active) ? w.active : open[0]);
+  // Everything else is open elsewhere: a fresh one. (Not a return: the listeners below, the close handler and
+  // reopening last session's windows must still be set up.)
+  if (!open.length) createWorkspace();
+  else {
+    ws.open = open;
+    activate(w && open.includes(w.active) ? w.active : open[0]);
+  }
 
   // Another window dropped one of its workspaces onto this one.
   getCurrentWebviewWindow().listen<string>("adopt-workspace", ({ payload }) => (activate(payload), win.setFocus()));
@@ -318,12 +403,15 @@ export function initWorkspaces() {
   getCurrentWebviewWindow().listen<{ label: string; target: string | null }>("tear-dropped", ({ payload }) => tearDropped(payload));
   getCurrentWebviewWindow().listen<string | null>("merge-hint", ({ payload }) => (ws.incoming = payload ?? ""));
   getCurrentWebviewWindow().listen<string>("merge-into", ({ payload }) => mergeInto(payload));
-  getCurrentWebviewWindow().listen<{ id: string; tab: L.Tab }>("adopt-tab", ({ payload }) => {
-    if (ws.open.includes(payload.id)) deliver(payload.id, payload.tab);
+  getCurrentWebviewWindow().listen<{ id: string; tab: L.Tab; draft?: string }>("adopt-tab", ({ payload: { id, tab, draft } }) => {
+    if (ws.open.includes(id)) deliver(id, tab, draft);
     else {
       // Left this window in the meantime: it's in storage now (or another window's, which will pick it up from there)
-      const l = load<Layout | null>("ws:" + payload.id, null);
-      if (l) addTo(l, payload.tab), store.set("ws:" + payload.id, JSON.stringify(l));
+      const l = loadLayout(id);
+      if (!l) return;
+      addTo(l, tab);
+      if (draft !== undefined) l.drafts = { ...l.drafts, [tab.id]: draft };
+      store.set("ws:" + id, JSON.stringify(l));
     }
   });
   // The Fleet view in another window jumps to one of our tabs.
@@ -336,13 +424,20 @@ export function initWorkspaces() {
   if (merge) mergeInto(merge);
 
   // Names and deletions made in other windows.
-  window.addEventListener("storage", (e) => e.key === "workspaces" && (ws.all = load("workspaces", [])));
+  window.addEventListener("storage", (e) => e.key === "workspaces" && (ws.all = loadMeta()));
 
-  // Closing a window (not quitting) gives its workspaces back; the last window's are kept to reopen on launch.
-  win.onCloseRequested(async () => {
-    save();
-    if ((await getAllWebviewWindows()).length > 1) store.remove("win:" + win.label);
+  // Closing a window gives its workspaces back, unsaved edits included; the last window's are kept to reopen on
+  // launch (closing it quits, so it asks about working agents first).
+  win.onCloseRequested(async (event) => {
+    const last = (await getAllWebviewWindows()).length <= 1;
+    if (last && !(await confirmQuit())) return event.preventDefault();
+    parkAll();
+    if (!last) store.remove("win:" + win.label);
   });
+  // Reload (⌘R): the editors go, their unsaved text comes back from storage.
+  window.addEventListener("pagehide", () => leaving || parkAll());
+  getCurrentWebviewWindow().listen("quit-requested", quit);
+  listen("park", () => (leaving || parkAll(), emit("parked")));
 
   // Reopen the other windows from last session (skipped when it's just the main window reloading).
   if (win.label === "main")

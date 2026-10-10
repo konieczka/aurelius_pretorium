@@ -7,6 +7,7 @@ import { hasPreview } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
 import { closeFleet } from "./fleetView.svelte";
+import { shells } from "./agents.svelte";
 
 /** Opening a tab brings the panes back from the Usage, Skills or Fleet view. */
 const closeViews = () => (closeUsage(), closeSkills(), closeFleet());
@@ -171,13 +172,27 @@ export function activate(tabId: string) {
   app.focused = f.pane.id;
 }
 
+/** Closing `t` loses work: unsaved edits, or a terminal's agent (closing ends the shell). Ask first. */
+async function okToClose(t: L.Tab) {
+  if (app.dirty[t.id]) return ask("Discard unsaved changes?", { kind: "warning" });
+  const agent = t.kind === "term" && shells.all[t.id]?.agent;
+  if (!agent) return true;
+  return ask(`${agent} is running in this terminal. Closing it stops ${agent}${shells.all[t.id].busy ? " in the middle of its work" : ""}.`, {
+    title: "Close terminal?", kind: "warning", okLabel: "Close", cancelLabel: "Cancel",
+  });
+}
+
 export async function closeTab(tabId: string) {
   const mi = app.minimized.findIndex((m) => m.tab.id === tabId);
-  if (mi >= 0) return dispose(app.minimized.splice(mi, 1)[0].tab);
-  const f = L.findTab(app.root, tabId);
-  if (!f) return;
-  const t = f.pane.tabs[f.index];
-  if (app.dirty[t.id] && !(await ask("Discard unsaved changes?", { kind: "warning" }))) return;
+  if (mi >= 0) {
+    if (!(await okToClose(app.minimized[mi].tab))) return;
+    const i = app.minimized.findIndex((m) => m.tab.id === tabId); // may have moved while asking
+    if (i >= 0) dispose(app.minimized.splice(i, 1)[0].tab);
+    return;
+  }
+  const t = L.findTab(app.root, tabId)?.pane.tabs.find((t) => t.id === tabId);
+  if (!t || !(await okToClose(t))) return;
+  if (!L.findTab(app.root, tabId)) return; // closed some other way while asking
   dispose(t);
   L.closeTab(app.root, tabId);
   fixFocus();

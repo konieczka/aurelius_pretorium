@@ -97,11 +97,13 @@
         const tab = L.findTab(app.root, id);
         const agent = spawned && !pending.has(id) && tab && relaunchCommand(tab.pane.tabs[tab.index]);
         const data = pending.get(id) ?? (agent ? agent + "\r" : "");
-        if (data) pending.delete(id), invoke("pty_write", { id, data });
+        if (data) pending.delete(id), write(data);
       })
       .catch((err) => term.write(`\x1b[31m${err}\x1b[0m\r\n`));
-    term.onData((data) => e.ready && invoke("pty_write", { id, data }));
-    term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }));
+    // Both fail once the shell has exited (the tab shows "[process exited]"): nothing to do about that here.
+    const write = (data: string) => invoke("pty_write", { id, data }).catch(() => {});
+    term.onData((data) => e.ready && write(data));
+    term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }).catch(() => {}));
     // Bells and notification escapes are read by the backend (status.rs), for every shell, shown or not.
     term.onTitleChange((t) => (app.titles[tabId] = t));
     entries.set(tabId, e);

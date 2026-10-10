@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { FileWarning, Grid2x2, Maximize, Minus, Moon, Music, Plus, Sun } from "@lucide/svelte";
   import { app } from "./state.svelte";
   import { isSvg, mediaKind } from "./media";
@@ -12,6 +12,14 @@
   // The webview caches file URLs: the version param picks up images regenerated on disk. (Not for players: it would restart them.)
   const src = $derived(given ?? `${convertFileSrc(path)}?v=${kind === "image" ? app.gitVersion : 0}`);
   let failed = $state(false);
+
+  // The asset protocol serves nothing until asked (not the whole disk): allow this file first.
+  let allowed = $state(false);
+  $effect(() => {
+    if (given) return void (allowed = true);
+    allowed = false;
+    invoke("allow_asset", { path }).then(() => (allowed = true), () => (failed = true));
+  });
 
   // Backdrop behind images: dark artwork disappears on the dark checkerboard (and light on light).
   const backdrops = ["checker", "light", "dark"] as const;
@@ -49,6 +57,8 @@
       <span>Can't display <b>{name}</b></span>
       <small>The file is missing or in a format this viewer doesn't support.</small>
     </div>
+  {:else if !allowed}
+    <!-- the file is being allowed: a moment -->
   {:else if kind === "image"}
     <div class="stage" bind:clientWidth={box.w} bind:clientHeight={box.h} {@attach wheelZoom}>
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
