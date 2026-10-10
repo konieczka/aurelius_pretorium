@@ -345,7 +345,7 @@ fn bar_under(app: &AppHandle, c: PhysicalPosition<f64>, skip: &str) -> Option<St
             && c.x >= p.x as f64
             && c.x < (p.x + s.width as i32) as f64
             && c.y >= p.y as f64
-            && c.y < inner.y as f64 + 40.0 * k;
+            && c.y < inner.y as f64 + 44.0 * k; // the top bar (also the title bar: overlay style, so inner = outer)
         hit.then_some(label)
     })
 }

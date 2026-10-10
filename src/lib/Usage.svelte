@@ -34,7 +34,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="usage">
+<div class="usage slab">
   <div class="page">
     <header>
       <div>
@@ -173,12 +173,12 @@
 </div>
 
 <style>
+  /* Plane 2: a slab, like the panes it stands in for */
   .usage {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
     overflow: auto;
-    background: var(--background);
   }
   .page {
     container-type: inline-size;

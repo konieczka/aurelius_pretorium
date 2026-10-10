@@ -184,7 +184,7 @@
     height: 26px;
     padding: 0 8px 0 2px;
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--r-chip);
     background: none;
     color: var(--sidebar-foreground);
     font-size: 13px;
@@ -194,24 +194,16 @@
     transition: background-color var(--dur-quick) var(--ease-standard);
   }
   .row:hover {
-    background: color-mix(in oklch, var(--sidebar-accent) 60%, transparent);
+    background: var(--hover);
   }
+  /* Gold marks selection */
   .row.active {
-    background: var(--sidebar-accent);
+    background: var(--gold-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--gold) 30%, transparent);
   }
   .row.drop {
     background: var(--gold-soft);
     box-shadow: inset 0 0 0 1px var(--gold-ring);
-  }
-  .row.active::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 6px;
-    bottom: 6px;
-    width: 2px;
-    border-radius: 9999px;
-    background: var(--gold);
   }
   .creating {
     cursor: default;

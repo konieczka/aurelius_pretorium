@@ -106,7 +106,7 @@
 {#if app.workspace}
   <div class="app" class:collapsed={!app.sidebarOpen}>
     <WorkspaceBar />
-    <aside inert={!app.sidebarOpen} onpointerdown={() => (app.treeFocused = true)}>
+    <aside class="glass" inert={!app.sidebarOpen} onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">
           <FolderRoot size={14} strokeWidth={1.5} /><span class="name">{app.workspace.split("/").pop()}</span><ChevronsUpDown size={13} strokeWidth={1.5} />
@@ -174,16 +174,21 @@
 {/if}
 
 <style>
+  /* Planes: the bar and status line sit on the field; the sidebar island and the work slabs float on it, a gutter apart */
   .app {
     display: grid;
     grid-template-columns: 248px 1fr;
     grid-template-rows: auto minmax(0, 1fr) auto;
+    column-gap: var(--gap);
+    box-sizing: border-box;
     height: 100vh;
-    transition: grid-template-columns var(--dur-base) var(--ease-standard);
+    padding: 0 var(--gap);
+    transition: grid-template-columns var(--dur-base) var(--ease-standard), column-gap var(--dur-base) var(--ease-standard);
   }
   /* The column animates to 0; the sidebar keeps its 248px inside so its contents don't reflow while sliding */
   .app.collapsed {
     grid-template-columns: 0 1fr;
+    column-gap: 0;
   }
   aside {
     display: flex;
@@ -191,8 +196,7 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--sidebar);
-    border-right: 1px solid var(--border-strong);
+    border-radius: var(--r-island);
     transition: opacity var(--dur-base) var(--ease-standard), visibility var(--dur-base);
   }
   aside > * {
@@ -203,47 +207,53 @@
   .app.collapsed aside {
     opacity: 0;
     visibility: hidden;
-    border-right-color: transparent;
   }
   header {
     display: flex;
     align-items: center;
-    height: 34px;
     flex: none;
-    padding: 0 6px 0 12px;
-    border-bottom: 1px solid var(--sidebar-border);
+    padding: 10px 10px 6px;
   }
   .toolbar {
     display: flex;
     align-items: center;
     gap: 2px;
-    height: 32px;
     flex: none;
-    padding: 0 6px;
-    border-bottom: 1px solid var(--sidebar-border);
+    padding: 0 10px 6px;
   }
   .spacer {
     flex: 1;
   }
+  /* Segmented control: a recessed track, the active tool a raised chip with a gold tick */
   .modes {
     display: flex;
     gap: 2px;
+    padding: 2px;
+    border-radius: var(--r-control);
+    background: oklch(var(--shadow-tint) / 0.07);
+    box-shadow: inset 0 1px 2px oklch(var(--shadow-tint) / 0.1);
   }
-  /* Gold marks the active tool */
+  :global(.dark) .modes {
+    background: oklch(var(--shadow-tint) / 0.3);
+    box-shadow: inset 0 1px 2px oklch(var(--shadow-tint) / 0.4);
+  }
   .mode {
     position: relative;
+    width: 34px;
   }
   .mode.on {
-    background: var(--sidebar-accent);
-    color: var(--sidebar-foreground);
+    background: var(--chip-on);
+    box-shadow: var(--sh-chip);
+    color: var(--foreground);
   }
   .mode.on::after {
     content: "";
     position: absolute;
-    left: 6px;
-    right: 6px;
-    bottom: -3px;
+    left: 50%;
+    bottom: 3px;
+    width: 10px;
     height: 2px;
+    margin-left: -5px;
     border-radius: 9999px;
     background: var(--gold);
   }
@@ -266,21 +276,26 @@
   .ws {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    flex: 1;
     min-width: 0;
-    max-width: 100%;
-    padding: 3px 6px;
-    margin-left: -6px;
+    height: 34px;
+    padding: 0 10px;
     border: 0;
-    border-radius: 6px;
-    background: none;
+    border-radius: 12px;
+    background: var(--hover);
+    box-shadow: inset 0 1px 0 var(--hl);
     color: inherit;
     cursor: pointer;
     font-size: 13px;
     font-weight: 500;
+    transition: background-color var(--dur-quick) var(--ease-standard);
   }
   .ws:hover {
     background: var(--accent);
+  }
+  .ws > :global(svg:last-child) {
+    margin-left: auto;
   }
   .ws > :global(svg) {
     flex: none;
@@ -294,7 +309,7 @@
   .tree {
     flex: 1;
     overflow: auto;
-    padding: 6px 6px 12px;
+    padding: 2px 8px 12px;
   }
   .tree.drop {
     background: var(--gold-soft);
@@ -303,6 +318,7 @@
   main {
     position: relative;
     min-width: 0;
+    min-height: 0;
   }
   main.away {
     display: none;
@@ -347,9 +363,11 @@
     height: 36px;
     padding: 0 16px;
     border: 1px solid var(--input);
-    border-radius: var(--radius-md);
-    background: var(--background);
-    box-shadow: var(--shadow-raised);
+    border-radius: 12px;
+    background: var(--chrome);
+    -webkit-backdrop-filter: var(--blur-chrome);
+    backdrop-filter: var(--blur-chrome);
+    box-shadow: var(--sh-chrome);
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;

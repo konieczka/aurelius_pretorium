@@ -81,7 +81,7 @@
 
 <svelte:window onkeydown={onKey} onfocus={reload} />
 
-<div class="agents">
+<div class="agents slab">
   <div class="page">
     <header>
       <div>
@@ -229,13 +229,13 @@
 
 <style>
   /* Header fixed; the list and the selected agent scroll on their own */
+  /* Plane 2: a slab, like the panes it stands in for */
   .agents {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--background);
   }
   .page {
     display: flex;

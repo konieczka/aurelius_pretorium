@@ -52,7 +52,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="scrim" onclick={() => close(null)}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-    <div class="box" onclick={(e) => e.stopPropagation()}>
+    <div class="box glass-float" onclick={(e) => e.stopPropagation()}>
       <input
         {@attach (el) => el.focus()}
         bind:value={query}
@@ -79,51 +79,68 @@
 {/if}
 
 <style>
+  /* Plane 3: the app dims and softens behind thick glass */
   .scrim {
     position: fixed;
     inset: 0;
     z-index: 100;
+    background: var(--scrim);
+    -webkit-backdrop-filter: blur(3px) saturate(90%);
+    backdrop-filter: blur(3px) saturate(90%);
+    animation: fade var(--dur-quick) var(--ease-standard);
   }
-  /* Aurelius popover */
   .box {
     position: absolute;
-    top: 48px;
+    top: 64px;
     left: 50%;
-    width: min(560px, calc(100vw - 32px));
+    box-sizing: border-box;
+    width: min(600px, calc(100vw - 32px));
     transform: translateX(-50%);
-    padding: 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    background: var(--popover);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 28px 64px -22px oklch(var(--shadow-tint) / 0.38);
+    padding: 8px;
+    border-radius: var(--r-float);
+    animation: rise var(--dur-base) var(--ease-out-quint);
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-6px) scale(0.98);
+    }
   }
   input {
     box-sizing: border-box;
     width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid var(--gold-ring);
-    border-radius: var(--radius-md);
-    background: var(--background);
+    height: 42px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 14px;
+    background: oklch(var(--shadow-tint) / 0.06);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--gold) 50%, transparent), 0 0 0 4px var(--gold-soft);
     color: var(--foreground);
     font: inherit;
-    font-size: 13px;
+    font-size: 14px;
     outline: none;
   }
+  :global(.dark) input {
+    background: oklch(0 0 0 / 0.2);
+  }
   .list {
-    max-height: 340px;
-    margin-top: 4px;
+    max-height: 360px;
+    margin-top: 6px;
     overflow: auto;
   }
   .item {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    padding: 5px 8px;
+    padding: 8px 12px;
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: 12px;
     background: none;
     font-size: 13px;
     text-align: left;
@@ -131,8 +148,8 @@
     cursor: pointer;
   }
   .item.sel {
-    background: var(--accent);
-    box-shadow: inset 2px 0 0 var(--gold);
+    background: var(--chip-on);
+    box-shadow: var(--sh-chip), inset 3px 0 0 var(--gold);
   }
   .detail {
     flex: 1;

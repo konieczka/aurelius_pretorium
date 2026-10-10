@@ -64,7 +64,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="fleet">
+<div class="fleet slab">
   <div class="page">
     <header>
       <div>
@@ -123,12 +123,12 @@
 </div>
 
 <style>
+  /* Plane 2: a slab, like the panes it stands in for */
   .fleet {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
     overflow: auto;
-    background: var(--background);
   }
   .page {
     max-width: 980px;

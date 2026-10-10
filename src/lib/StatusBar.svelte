@@ -25,7 +25,7 @@
     <button onclick={switchWorktree} title="Worktree: {git.root} (click to switch or create)">
       <FolderGit2 size={13} strokeWidth={1.5} />{folder}
     </button>
-    <button onclick={switchBranch} title="Branch{s.upstream ? ` (tracking ${s.upstream})` : ''} (click to switch or create)">
+    <button class="glass" onclick={switchBranch} title="Branch{s.upstream ? ` (tracking ${s.upstream})` : ''} (click to switch or create)">
       <GitBranch size={13} strokeWidth={1.5} />{branchName()}{#if s.files.length}*{/if}{#if git.op}<span class="op">{git.op} in progress</span>{/if}
     </button>
     {#if git.busy}
@@ -46,7 +46,7 @@
   <!-- Minimized terminals: click to put one back where it was -->
   <span class="spacer"></span>
   {#each app.minimized as { tab: t } (t.id)}
-    <button class="min" title="Restore {tabLabel(t)}" onclick={() => restoreTab(t.id)} oncontextmenu={(e) => minMenu(e, t)} onauxclick={(e) => e.button === 1 && closeTab(t.id)}>
+    <button class="min glass" title="Restore {tabLabel(t)}" onclick={() => restoreTab(t.id)} oncontextmenu={(e) => minMenu(e, t)} onauxclick={(e) => e.button === 1 && closeTab(t.id)}>
       {#if t.kind === "term" && t.agent && agentProvider[t.agent]}
         <span class="agent" class:working={activity[t.id] === "busy"}><ProviderIcon provider={agentProvider[t.agent]} size={12} /></span>
       {:else}<SquareTerminal size={12} strokeWidth={1.5} />{/if}
@@ -57,15 +57,14 @@
 </footer>
 
 <style>
+  /* Plane 0: pills on the field, no bar. The branch and minimized terminals are glass chips. */
   footer {
     grid-column: 1 / -1;
     display: flex;
-    align-items: stretch;
-    gap: 2px;
-    height: 24px;
-    padding: 0 6px;
-    background: var(--sidebar);
-    border-top: 1px solid var(--border-strong);
+    align-items: center;
+    gap: 3px;
+    height: 32px;
+    padding: 0 2px;
     font-size: 12px;
     color: var(--muted-foreground);
   }
@@ -74,8 +73,10 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 0 7px;
+    height: 22px;
+    padding: 0 9px;
     border: 0;
+    border-radius: 9999px;
     background: none;
     color: inherit;
     font-size: 12px;
@@ -86,7 +87,11 @@
     transition: background-color var(--dur-quick) var(--ease-standard), color var(--dur-quick) var(--ease-standard);
   }
   button:hover {
-    background: var(--accent);
+    background: var(--hover);
+    color: var(--foreground);
+  }
+  button.glass {
+    background: var(--chrome);
     color: var(--foreground);
   }
   .spacer {
