@@ -1,6 +1,8 @@
 /* Aurelius design tokens, copied from aurelius_chat/src/styles/globals.css. Keep in sync by hand. */
 @import "@fontsource-variable/geist";
 @import "@fontsource/cinzel/600.css";
+/* Alternate palettes (Settings); the default Aurelius palette is :root / .dark below */
+@import "./palettes.css";
 
 :root {
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;

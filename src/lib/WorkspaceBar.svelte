@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, PanelLeft, PanelLeftClose, Plus, SlidersHorizontal, Sun, X } from "@lucide/svelte";
+  import { Brain, Flame, Gauge, LayoutGrid, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
   import GalleyIcon from "./GalleyIcon.svelte";
-  import { cycleTheme, theme } from "./theme.svelte";
+  import { settings, toggleSettings } from "./settingsView.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
@@ -18,7 +18,6 @@
   } from "./workspaces.svelte";
 
   let editing = $state(""); // workspace id being renamed
-  const ThemeIcon = $derived({ light: Sun, dark: Moon, system: Monitor }[theme.mode]);
 
   // Background workspaces' agents: a dot on their tab while one needs you, or works. Re-read every poll: tabs move
   // between workspaces without telling us.
@@ -237,8 +236,15 @@
   >
     <Flame size={14} strokeWidth={1.5} />
   </button>
-  <button class="icon-btn" onclick={cycleTheme} title="Theme: {theme.mode}" aria-label="Theme: {theme.mode}. Click to change.">
-    <ThemeIcon size={14} strokeWidth={1.5} />
+  <button
+    class="icon-btn view"
+    class:on={settings.open}
+    onclick={toggleSettings}
+    title="Settings (⌘,)"
+    aria-label="Settings"
+    aria-pressed={settings.open}
+  >
+    <Settings size={14} strokeWidth={1.5} />
   </button>
   </div>
 </div>

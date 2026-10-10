@@ -5,11 +5,12 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import "@xterm/xterm/css/xterm.css";
   import { app } from "./state.svelte";
-  import { theme } from "./theme.svelte";
+  import { cssHex, theme } from "./theme.svelte";
   import { relaunchCommand } from "./agents.svelte";
   import * as L from "./layout";
 
-  // xterm takes hex only: Aurelius tokens converted from oklch (bg = --surface, cursor = --gold).
+  // ANSI colours per mode, tuned for the Aurelius surfaces (the alternate palettes keep them: same lightness).
+  // xterm takes hex only; background, text, cursor and selection are read from the palette's CSS (termTheme).
   const palettes = {
     light: {
       background: "#fff9ee", foreground: "#14110d", cursor: "#966a00", cursorAccent: "#fff9ee", selectionBackground: "#ba890040",
@@ -22,6 +23,19 @@
       brightBlack: "#75716a", brightRed: "#ffa59d", brightGreen: "#91d993", brightYellow: "#e8be62", brightBlue: "#86caff", brightMagenta: "#d0b2ff", brightCyan: "#4cdbe3", brightWhite: "#f8f5ef",
     },
   };
+
+  function termTheme() {
+    const gold = cssHex("--gold").slice(0, 7);
+    const background = cssHex("--surface").slice(0, 7);
+    return {
+      ...palettes[theme.dark ? "dark" : "light"],
+      background,
+      foreground: cssHex("--foreground").slice(0, 7),
+      cursor: gold,
+      cursorAccent: background,
+      selectionBackground: gold + "40",
+    };
+  }
 
   // Terminals outlive their component so moving a tab or re-splitting never kills the shell.
   // The shell itself lives in the backend under the tab id and outlives this window too (reload, workspace moved).
@@ -52,7 +66,7 @@
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
       lineHeight: 1.15,
-      theme: palettes[theme.dark ? "dark" : "light"],
+      theme: termTheme(),
       cursorBlink: true,
       allowProposedApi: true,
       macOptionIsMeta: true,
@@ -113,7 +127,8 @@
 
   $effect(() => {
     const e = entries.get(tabId);
-    if (e) e.term.options.theme = palettes[theme.dark ? "dark" : "light"];
+    void theme.palette;
+    if (e) e.term.options.theme = termTheme();
   });
 </script>
 

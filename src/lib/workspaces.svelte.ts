@@ -8,7 +8,7 @@ import { activate as activateTab, allTabs, app, dispose, load, openWorkspace, re
 import { focusTerm } from "./Terminal.svelte";
 import { closeFleet } from "./fleetView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
-import { theme } from "./theme.svelte";
+import { cssHex } from "./theme.svelte";
 
 // A workspace is a named arrangement of panes and tabs, plus the folder its sidebar shows.
 // Each one is open in at most one window at a time (terminal views live in a window); its shells live in the
@@ -271,7 +271,7 @@ async function mergeInto(target: string) {
 
 function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }) {
   // Background = the theme's surface (as in Terminal.svelte), so a torn-off window doesn't flash white while loading.
-  const backgroundColor = theme.dark ? "#110d07" : "#fff9ee";
+  const backgroundColor = cssHex("--surface").slice(0, 7);
   const w = new WebviewWindow(label, {
     url: "/", title: "Pretorium", dragDropEnabled: false, focus: true, backgroundColor,
     // Same chrome as the main window (tauri.conf.json): the top bar is the title bar

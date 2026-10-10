@@ -21,6 +21,8 @@
   import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
   import Fleet from "$lib/Fleet.svelte";
   import { closeFleet, fleet, toggleFleet } from "$lib/fleetView.svelte";
+  import Settings from "$lib/Settings.svelte";
+  import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
@@ -70,6 +72,8 @@
     const act =
       // ⌘= / ⌘- / ⌘0 are View menu shortcuts; ⌘+ (⇧=) doesn't match the menu's key equivalent.
       k === "+" ? () => zoom(0.1) :
+      k === "," ? toggleSettings :
+      k === "w" && settings.open ? closeSettings :
       k === "o" ? pickFolder :
       k === "p" ? switchFolder :
       !app.workspace ? null :
@@ -158,9 +162,9 @@
         <div class="tree"><GitPanel /></div>
       {/if}
     </aside>
-    <!-- The Usage, Skills, Agents and Fleet views stand in for the panes; they stay mounted (terminals keep running) -->
-    <main class:away={usage.open || skills.open || agents.open || fleet.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
-    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{:else if fleet.open}<Fleet />{/if}
+    <!-- The Usage, Skills, Agents, Fleet and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open || skills.open || agents.open || fleet.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{:else if fleet.open}<Fleet />{:else if settings.open}<Settings />{/if}
     <StatusBar />
   </div>
   <QuickPick />
