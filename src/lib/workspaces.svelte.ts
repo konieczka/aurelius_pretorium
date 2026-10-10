@@ -265,13 +265,14 @@ export async function tearOut(id: string, grab: { x: number; y: number }) {
   const titleBar = (await win.innerPosition()).y - (await win.outerPosition()).y;
   const [dx, dy] = [grab.x * scale, grab.y * scale + titleBar];
   let label = win.label; // the window's only workspace: move the window itself
+  if (label === win.label && ws.open.length === 1 && (await win.isFullscreen())) return; // a full-screen window stays put
   if (ws.open.length > 1) {
     const size = (await win.innerSize()).toLogical(scale);
     const c = await cursorPosition();
     release(id);
     label = "w-" + L.uid().slice(0, 8);
     store.set("win:" + label, JSON.stringify({ open: [id], active: id } satisfies Win));
-    newWindow(label, { x: (c.x - dx) / scale, y: (c.y - dy) / scale, width: size.width, height: size.height, focus: false });
+    newWindow(label, { x: (c.x - dx) / scale, y: (c.y - dy) / scale, width: size.width, height: size.height, focus: false }, false);
   }
   invoke("follow_cursor", { label, id, source: win.label, dx, dy });
 }
@@ -303,7 +304,9 @@ async function mergeInto(target: string) {
   if (!ws.open.length) win.destroy();
 }
 
-function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }) {
+/** Open a window for `label`. It starts hidden and the backend shows it (`show`: right away; else follow_cursor does,
+ * for a tear-off): created visible while the app is in full screen, it would hang the app (see show_window). */
+function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }, show = true) {
   // Background = the theme's surface (as in Terminal.svelte), so a torn-off window doesn't flash white while loading.
   const backgroundColor = cssHex("--surface").slice(0, 7);
   const w = new WebviewWindow(label, {
@@ -311,7 +314,9 @@ function newWindow(label: string, opts: { x?: number; y?: number; width: number;
     // Same chrome as the main window (tauri.conf.json): the top bar is the title bar
     titleBarStyle: "overlay", hiddenTitle: true, trafficLightPosition: new LogicalPosition(18, 22),
     ...opts,
+    visible: false,
   });
+  if (show) w.once("tauri://created", () => invoke("show_window", { label }));
   w.once("tauri://error", (e) => {
     store.remove("win:" + label); // else its workspaces stay "open in another window" that doesn't exist
     message(`Couldn't open the window: ${JSON.stringify(e.payload)}`, { kind: "error" });

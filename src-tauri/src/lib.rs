@@ -409,6 +409,15 @@ struct TearDrop {
     target: Option<String>,
 }
 
+/// Show a window the app opened hidden. Every new window is: one created visible while the app is in full screen
+/// is put on screen inside tao's event handler, where AppKit's full-screen transition redraws synchronously and
+/// re-enters that handler while it holds its lock, hanging the app (tearing off a workspace in full screen did).
+/// Shown afterwards, it just appears, in the full-screen space.
+#[tauri::command]
+async fn show_window(app: AppHandle, label: String) -> Res<()> {
+    app.get_webview_window(&label).ok_or("no such window")?.show().map_err(err)
+}
+
 /// Tab tear-off: window `label` (holding workspace `id`) follows the cursor at offset dx, dy (physical px) until the
 /// left button is released; then `source` gets "tear-dropped". Runs here, not in JS: the webview stops getting
 /// pointer events once a window moves or appears under the cursor.
@@ -418,9 +427,14 @@ struct TearDrop {
 fn follow_cursor(app: AppHandle, label: String, id: String, source: String, dx: f64, dy: f64) {
     std::thread::spawn(move || {
         let mut hover: Option<String> = None;
+        let mut shown = false; // a new follower is opened hidden (see show_window): shown once it exists
         loop {
             if let (Ok(c), Some(w)) = (app.cursor_position(), app.get_webview_window(&label)) {
                 let _ = w.set_position(PhysicalPosition::new(c.x - dx, c.y - dy));
+                if !shown {
+                    shown = true;
+                    let _ = w.show();
+                }
                 let target = bar_under(&app, c, &label);
                 if target != hover {
                     if let Some(old) = &hover {
@@ -440,6 +454,16 @@ fn follow_cursor(app: AppHandle, label: String, id: String, source: String, dx: 
         }
         if let Some(t) = &hover {
             let _ = app.emit_to(t.as_str(), "merge-hint", None::<String>);
+        }
+        // Released before the new window existed (a quick flick): it still has to be seen, unless it's merging.
+        if !shown && hover.is_none() {
+            for _ in 0..250 {
+                if let Some(w) = app.get_webview_window(&label) {
+                    let _ = w.show();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
         }
         let _ = app.emit_to(source.as_str(), "tear-dropped", TearDrop { label, target: hover });
     });
@@ -880,7 +904,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
