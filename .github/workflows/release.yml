@@ -8,6 +8,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      notes:
+        description: What's new (shown in the app's update prompt and on the release page)
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -35,5 +40,6 @@ jobs:
           args: --target universal-apple-darwin
           tagName: v__VERSION__
           releaseName: Pretorium v__VERSION__
-          releaseBody: Download Pretorium.dmg below. Installed copies update themselves.
+          # Also latest.json's notes, which the update prompt shows: fixed at build time, not by editing the release later.
+          releaseBody: ${{ inputs.notes || 'Download Pretorium.dmg below. Installed copies update themselves.' }}
           releaseDraft: true
