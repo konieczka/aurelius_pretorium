@@ -58,6 +58,9 @@ export const ownerOf = (path: string, dir = false) =>
 const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" ? "" : t.path);
 /** Folder a tab belongs to ("" for an unsaved note or a web page). A terminal's follows its shell's `cd`. */
 export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t), t.kind === "term") : "");
+/** Folder whose checkout (worktree / branch) a tab shows: a terminal's own directory, as an agent may have moved into
+ * a worktree nested in the opened folder (e.g. .claude/worktrees/x); else the folder it belongs to. */
+export const repoKey = (t: L.Tab) => (t.kind === "term" ? t.cwd : tabOwner(t));
 /** Folder a tab belongs to, or "" when it's in the current workspace. */
 export function foreignOwner(t: L.Tab) {
   const p = tabPath(t);

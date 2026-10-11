@@ -291,7 +291,7 @@ struct Shell {
     agent: Option<String>, // agent command in the foreground; None when it's the shell itself or another job
     quiet: Option<u64>,    // ms since its last output that wasn't an echo of input (None: none yet)
     title: String,
-    cwd: String, // the shell's working directory now
+    cwd: String, // the agent's working directory now, or else the shell's
     busy: bool,
     attention: bool, // the agent rang, or finished, while no window had it on screen
     since: u64,      // ms since the agent came or went, or started or stopped working
@@ -310,18 +310,19 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
             }
         }
     }
-    let mut agents: HashMap<String, &'static str> = HashMap::new();
+    let mut agents: HashMap<String, (&'static str, Vec<u32>)> = HashMap::new(); // tab id -> agent, its processes
     if !jobs.is_empty() {
-        let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pgid=,args="]).output())
+        let ps = tauri::async_runtime::spawn_blocking(|| std::process::Command::new("/bin/ps").args(["-A", "-ww", "-o", "pid=,pgid=,args="]).output())
             .await
             .map_err(err)?
             .map_err(err)?;
         // Any process in the job counts: the agent may be a child of a wrapper.
         for line in String::from_utf8_lossy(&ps.stdout).lines() {
-            let Some((pg, args)) = line.trim_start().split_once(' ') else { continue };
-            let Some(agent) = agent_in(args) else { continue };
+            let Some((pid, rest)) = line.trim_start().split_once(' ') else { continue };
+            let Some((pg, args)) = rest.trim_start().split_once(' ') else { continue };
+            let (Ok(pid), Some(agent)) = (pid.parse(), agent_in(args)) else { continue };
             for (id, _) in jobs.iter().filter(|(_, j)| pg.parse() == Ok(*j)) {
-                agents.insert(id.clone(), agent);
+                agents.entry(id.clone()).or_insert((agent, vec![])).1.push(pid);
             }
         }
     }
@@ -331,14 +332,19 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
         if seen.contains(id) {
             s.watch.seen(now);
         }
-        // Gone shells keep the last one seen.
-        if let Some(cwd) = s.child.process_id().and_then(cwd_of) {
+        // The agent's, while one runs: it may move itself into another worktree (Claude Code's EnterWorktree chdirs)
+        // while the shell stays put. Any of its processes that moved counts: with a wrapper (Codex's `node codex.js`
+        // runs a native `codex`) it may be the child. Gone shells keep the last one seen.
+        let shell = s.child.process_id().and_then(cwd_of);
+        let agent = agents.get(id);
+        let moved = agent.and_then(|(_, pids)| pids.iter().filter_map(|&p| cwd_of(p)).find(|c| Some(c) != shell.as_ref()));
+        if let Some(cwd) = moved.or(shell) {
             s.cwd = cwd;
         }
         let mut o = s.out.lock().unwrap();
         let quiet = o.active.map(|t| now.saturating_duration_since(t).as_millis() as u64);
         let rang = std::mem::take(&mut o.signals.rang);
-        let agent = agents.get(id).copied();
+        let agent = agent.map(|(a, _)| *a);
         let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang);
         shells.insert(id.clone(), Shell {
             agent: agent.map(String::from),

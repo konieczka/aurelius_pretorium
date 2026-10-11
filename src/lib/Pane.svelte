@@ -17,7 +17,7 @@
   import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, Globe, NotebookPen, Pencil, Rows2, SquareTerminal, TextWrap, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, openBrowser, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
+  import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, openBrowser, refreshRepo, repoKey, splitFocused, tabOwner } from "./state.svelte";
   import { moveTabTo, ws } from "./workspaces.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
@@ -63,9 +63,10 @@
   // Header above the content: which project / worktree / branch this tab belongs to, and where in it.
   const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
   const owner = $derived(tab ? tabOwner(tab) : "");
-  const repo = $derived(app.repos[owner]);
+  const key = $derived(tab ? repoKey(tab) : "");
+  const repo = $derived(app.repos[key]);
   $effect(() => {
-    if (owner && !(owner in app.repos)) refreshRepo(owner); // new folder: don't wait for the next git poll
+    if (key && !(key in app.repos)) refreshRepo(key); // new folder: don't wait for the next git poll
   });
   const where = $derived.by(() => {
     if (!tab || !owner) return null;

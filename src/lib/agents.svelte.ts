@@ -5,7 +5,7 @@ import type { Provider } from "./usageStats";
 
 // Coding agents running in terminals. A term tab's `agent` is the agent its shell last had in the foreground; it's
 // saved with the layout, so a shell started fresh for the tab (app relaunch, workspace reopened) starts it again.
-// Its `cwd` likewise follows the shell's working directory.
+// Its `cwd` likewise follows the shell's working directory, or its agent's (which may move into another worktree).
 
 /** Agent command (what the backend reports) -> its provider, for the tab's name and icon. */
 export const agentProvider: Record<string, Provider> = { claude: "claude", codex: "codex", agy: "antigravity", grok: "grok", opencode: "opencode" };
