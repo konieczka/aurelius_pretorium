@@ -4,6 +4,14 @@
 # Run it from the Actions tab once `version` in src-tauri/tauri.conf.json is bumped. Needs the repository secret
 # TAURI_SIGNING_PRIVATE_KEY (contents of ~/.tauri/pretorium.key), plus TAURI_SIGNING_PRIVATE_KEY_PASSWORD if the
 # key has one.
+#
+# The app itself is signed with a Developer ID and notarized, so macOS keeps its permission grants (folders, keychain
+# "Always Allow") across updates and downloads open without "Open Anyway". That needs these secrets too:
+#   APPLE_CERTIFICATE           the "Developer ID Application" certificate + private key, exported as .p12, base64'd
+#   APPLE_CERTIFICATE_PASSWORD  the .p12's export password
+#   APPLE_SIGNING_IDENTITY      e.g. "Developer ID Application: Michał Konieczka (TEAMID)"
+#   APPLE_ID, APPLE_PASSWORD    the Apple Account and an app-specific password for it (account.apple.com), to notarize
+#   APPLE_TEAM_ID               the 10-character team ID
 name: Release
 
 on:
@@ -13,6 +21,10 @@ on:
         description: What's new (shown in the app's update prompt and on the release page)
         required: false
         default: ""
+      dry_run:
+        description: Build, sign, notarize and check it, but make no release (to test the signing setup)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,16 +42,48 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile
+      # Without these Tauri quietly builds an ad-hoc signed app again, whose grants reset on every update.
+      - name: Check the Apple signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || { echo "::error::Missing repository secret $v"; missing=1; }
+          done
+          exit $missing
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Tauri imports the certificate into a temporary keychain, signs with the hardened runtime and notarizes.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: bun run tauri
           args: --target universal-apple-darwin
-          tagName: v__VERSION__
+          # No tag: tauri-action only builds.
+          tagName: ${{ !inputs.dry_run && 'v__VERSION__' || '' }}
           releaseName: Pretorium v__VERSION__
           # Also latest.json's notes, which the update prompt shows: fixed at build time, not by editing the release later.
           releaseBody: ${{ inputs.notes || 'Download Pretorium.dmg below. Installed copies update themselves.' }}
           releaseDraft: true
+      # The draft is already up by now (unless dry_run): a failure here means don't publish it.
+      - name: Check the app is Developer ID signed and notarized
+        run: |
+          app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Pretorium.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dvv "$app" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|flags)'
+          codesign -dvv "$app" 2>&1 | grep -q '^Authority=Developer ID Application' || { echo "::error::Not Developer ID signed"; exit 1; }
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"

@@ -28,7 +28,7 @@ How it's wired:
 ```sh
 git fetch origin --tags                 # tags are made by the workflow on GitHub: fetch them to compare with
 git status -sb                          # on main, in sync with origin
-gh secret list                          # TAURI_SIGNING_PRIVATE_KEY must be there
+gh secret list                          # TAURI_SIGNING_PRIVATE_KEY and the APPLE_* signing secrets must be there
 gh release list --limit 3               # the latest published version; any leftover drafts
 git log --oneline v<last>..origin/main  # what this release would ship
 ```
@@ -42,7 +42,7 @@ git log --oneline v<last>..origin/main  # what this release would ship
 - **Uncommitted changes:** releasing builds what's on `origin/main`, not the working tree. Ask whether they belong in
   this release. Leave unrelated files alone (the user keeps untracked notes like `lp.md` in the repo).
 - **Committing:** always stage files by name, never `git add -A`.
-- **Missing signing secret:** stop and ask the user to add it. Don't upload `~/.tauri/pretorium.key` yourself unless
+- **Missing signing secret** (updater key or any `APPLE_*`): stop and ask the user to add it. Don't upload `~/.tauri/pretorium.key` yourself unless
   they ask.
 
 ### 2. Pick the version and write the notes
@@ -128,6 +128,6 @@ or right away from **Pretorium → Check for Updates…**. If any step was skipp
   key they shipped with. Rotating it needs a deliberate migration, not a release step.
 - **Deleting or un-publishing the latest release.** The endpoint then serves the previous one, or nothing.
 
-The app isn't code signed (no Apple Developer ID yet), so a freshly downloaded `.dmg` needs "Open Anyway" in System
-Settings → Privacy & Security on first launch. Updates through the built-in updater don't. That's expected, not a
-release problem.
+The app is signed with a Developer ID and notarized by the workflow (the `APPLE_*` secrets; see the comment at the top
+of `release.yml`). The last workflow step checks that; if it fails, don't publish the draft: an ad-hoc signed build
+would make macOS forget every permission users granted, and fresh downloads would need "Open Anyway" again.

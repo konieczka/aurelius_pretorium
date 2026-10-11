@@ -41,7 +41,9 @@ A local build signs updates when the key is in the environment:
 TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/pretorium.key)" bun run tauri build   # src-tauri/target/release/bundle/
 ```
 
-The app isn't code signed yet, so macOS asks before the first launch of a downloaded copy (System Settings → Privacy
-& Security → Open Anyway). Distributing it without that needs a Developer ID signature and notarization: set
-`APPLE_SIGNING_IDENTITY` (and `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` for notarization) before building, or as
-secrets for the workflow. See <https://v2.tauri.app/distribute/sign/macos/>.
+The workflow also signs the app with a Developer ID and notarizes it. A stable signature is what lets macOS remember
+the permissions it granted (folder access, keychain "Always Allow") across updates; an ad-hoc signed build looks like a
+new app every time. It needs the repository secrets `APPLE_CERTIFICATE` (the "Developer ID Application" certificate
+and key as a base64'd `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, and for notarization `APPLE_ID`,
+`APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`; the workflow stops if any is missing. Local builds stay
+ad-hoc signed unless the same variables are set. See <https://v2.tauri.app/distribute/sign/macos/>.
