@@ -4,7 +4,7 @@ import * as L from "./layout";
 import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
 import { disposeBrowser, focusAddress } from "./Browser.svelte";
-import { hasPreview } from "./media";
+import { hasPreview, isDrawing } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
 import { closeFleet } from "./fleetView.svelte";
@@ -182,7 +182,10 @@ export function splitFocused(dir: "row" | "col") {
 export function openFile(path: string) {
   closeViews();
   const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
-  if (existing) return activate(existing.id);
+  if (existing) {
+    if (existing.kind === "file" && isDrawing(path)) existing.preview = true; // a drawing opens as one, not its JSON
+    return activate(existing.id);
+  }
   const p = focusedPane();
   p.tabs.push({ id: L.uid(), kind: "file", path, preview: hasPreview(path) });
   p.active = p.tabs.length - 1;
