@@ -670,22 +670,124 @@ fn clipboard_set_file(path: String) -> Res<()> {
 #[tauri::command]
 fn clipboard_files() -> Vec<String> {
     #[cfg(target_os = "macos")]
-    {
-        use objc2::ClassType;
-        use objc2_app_kit::{NSPasteboard, NSPasteboardURLReadingFileURLsOnlyKey};
-        use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSURL};
-        let pb = NSPasteboard::generalPasteboard();
-        let classes = NSArray::from_slice(&[NSURL::class()]);
-        let yes = NSNumber::new_bool(true);
-        let opts = NSDictionary::from_slices(&[unsafe { NSPasteboardURLReadingFileURLsOnlyKey }], &[&*yes as &objc2::runtime::AnyObject]);
-        let Some(objs) = (unsafe { pb.readObjectsForClasses_options(&classes, Some(&opts)) }) else { return vec![] };
-        objs.iter()
-            .filter_map(|o| o.downcast::<NSURL>().ok())
-            .filter_map(|u| u.path().map(|p| p.to_string()))
-            .collect()
-    }
+    return pasteboard_files(&objc2_app_kit::NSPasteboard::generalPasteboard());
     #[cfg(not(target_os = "macos"))]
     CLIP.lock().unwrap().clone()
+}
+
+/// Files of the drag just dropped on the page (from Finder etc.): the webview's drop event only has their contents.
+#[tauri::command]
+fn drag_files() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    return pasteboard_files(&objc2_app_kit::NSPasteboard::pasteboardWithName(unsafe { objc2_app_kit::NSPasteboardNameDrag }));
+    #[cfg(not(target_os = "macos"))]
+    vec![]
+}
+
+#[cfg(target_os = "macos")]
+fn pasteboard_files(pb: &objc2_app_kit::NSPasteboard) -> Vec<String> {
+    use objc2::ClassType;
+    use objc2_app_kit::NSPasteboardURLReadingFileURLsOnlyKey;
+    use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSURL};
+    let classes = NSArray::from_slice(&[NSURL::class()]);
+    let yes = NSNumber::new_bool(true);
+    let opts = NSDictionary::from_slices(&[unsafe { NSPasteboardURLReadingFileURLsOnlyKey }], &[&*yes as &objc2::runtime::AnyObject]);
+    let Some(objs) = (unsafe { pb.readObjectsForClasses_options(&classes, Some(&opts)) }) else { return vec![] };
+    objs.iter()
+        .filter_map(|o| o.downcast::<NSURL>().ok())
+        .filter_map(|u| u.path().map(|p| p.to_string()))
+        .collect()
+}
+
+/// A dropped file with no path to give (an image from a browser): saved to a temp folder.
+/// Body = the bytes, header `name` = the URI-encoded file name. Returns the saved file's path.
+#[tauri::command]
+fn save_drop(request: tauri::ipc::Request) -> Res<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected the file's bytes".into()) };
+    let name = request.headers().get("name").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let path = drop_path(&percent_decode(name)).map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Where to keep a dropped file named `name`: a fresh folder under the temp dir, so names never clash.
+fn drop_path(name: &str) -> std::io::Result<std::path::PathBuf> {
+    // Only the last component: the name comes from the page
+    let name = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "dropped".into());
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = std::env::temp_dir().join("pretorium-drops").join(stamp.to_string());
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(name))
+}
+
+/// Screenshot thumbnails (and other file promises) never reach the page: WKWebView fails to receive the promise and
+/// fires no `drop`. Their pasteboard also carries the file's URL though, so catch that drop natively instead: copy
+/// the files (the source deletes its temp copy) and hand the paths to the page as "promise-drop", which types them
+/// into the terminal the drag was over. Every other drop goes to the webview as before.
+#[cfg(target_os = "macos")]
+fn catch_promise_drops(webview: &tauri::Webview) {
+    let app = webview.app_handle().clone();
+    // Hooked on the webview's own class (wry's WKWebView subclass): its runtime name isn't stable
+    let _ = webview.with_webview(move |wv| unsafe { hook_drops((*(wv.inner() as *const objc2::runtime::AnyObject)).class(), app) });
+}
+
+#[cfg(target_os = "macos")]
+fn hook_drops(cls: &objc2::runtime::AnyClass, app: AppHandle) {
+    use objc2::runtime::{AnyObject, Bool, Imp, Sel};
+    use objc2::{msg_send, rc::Retained, sel};
+    use objc2_app_kit::NSPasteboard;
+    static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+    static ORIGINAL: std::sync::OnceLock<Imp> = std::sync::OnceLock::new();
+    if APP.set(app).is_err() {
+        return;
+    }
+    unsafe extern "C-unwind" fn perform(this: &AnyObject, cmd: Sel, info: &AnyObject) -> Bool {
+        let pb: Retained<NSPasteboard> = msg_send![info, draggingPasteboard];
+        let promised = pb.types().is_some_and(|ts| {
+            ts.iter().any(|t| ["com.apple.NSFilePromiseItemMetaData", "com.apple.pasteboard.promised-file-url"].contains(&&*t.to_string()))
+        });
+        let files: Vec<String> = if promised { pasteboard_files(&pb).into_iter().filter(|p| std::path::Path::new(p).is_file()).collect() } else { vec![] };
+        if files.is_empty() {
+            let Some(&original) = ORIGINAL.get() else { return Bool::NO };
+            let original: unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> Bool = std::mem::transmute(original);
+            return original(this, cmd, info);
+        }
+        let _: () = msg_send![this, draggingExited: info]; // end the drag in the page (it never gets a drop)
+        let copies: Vec<String> = files
+            .iter()
+            .filter_map(|f| {
+                let to = drop_path(f.rsplit('/').next().unwrap_or("")).ok()?;
+                std::fs::copy(f, &to).ok()?;
+                Some(to.to_string_lossy().into_owned())
+            })
+            .collect();
+        let _ = APP.get().unwrap().emit("promise-drop", copies);
+        Bool::YES
+    }
+    // Past the KVO subclass macOS swaps in at runtime, to the class wry defines
+    let mut cls = cls;
+    while cls.name().to_string_lossy().contains("NSKVONotifying_") {
+        let Some(sup) = cls.superclass() else { return };
+        cls = sup;
+    }
+    let Some(original) = cls.instance_method(sel!(performDragOperation:)).map(|m| m.implementation()) else { return };
+    let _ = ORIGINAL.set(original);
+    let imp: Imp = unsafe { std::mem::transmute(perform as unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> Bool) };
+    unsafe { objc2::ffi::class_replaceMethod(cls as *const _ as *mut _, sel!(performDragOperation:), imp, c"B@:@".as_ptr()) };
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        match (b[i], b.get(i + 1).and_then(|&c| hex(c)), b.get(i + 2).and_then(|&c| hex(c))) {
+            (b'%', Some(h), Some(l)) => (out.push((h * 16 + l) as u8), i += 3),
+            (c, _, _) => (out.push(c), i += 1),
+        };
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -896,6 +998,11 @@ pub fn run() {
                 _ => {}
             }
         })
+        .on_page_load(|webview, _| {
+            // The webview class exists once a page loads; installed once
+            #[cfg(target_os = "macos")]
+            catch_promise_drops(webview);
+        })
         .setup(|app| {
             let h = app.handle().clone();
             std::thread::spawn(move || flush_holding(&h));
@@ -904,7 +1011,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -936,6 +1043,14 @@ mod tests {
         assert_eq!(agent_in("node server.js"), None);
         assert_eq!(agent_in("claude-monitor"), None);
         assert_eq!(agent_in("-zsh"), None);
+    }
+
+    #[test]
+    fn decodes_dropped_file_names() {
+        use super::percent_decode;
+        assert_eq!(percent_decode("Screenshot%202026-10-11%20at%2010.00.00%E2%80%AFAM.png"), "Screenshot 2026-10-11 at 10.00.00\u{202f}AM.png");
+        assert_eq!(percent_decode("100%.txt"), "100%.txt");
+        assert_eq!(percent_decode("a%2"), "a%2");
     }
 
     #[test]

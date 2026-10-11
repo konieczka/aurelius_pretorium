@@ -1,5 +1,6 @@
 <script module lang="ts">
   import { Channel, invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
@@ -57,6 +58,49 @@
   export const queueInput = (tabId: string, data: string) => pending.set(tabId, data);
 
   export const focusTerm = (tabId: string) => entries.get(tabId)?.term.focus();
+
+  // Shell-quote a path the way Terminal.app does a dropped file: backslashes before the special characters.
+  const shellEscape = (p: string) => p.replace(/[\s!"#$&'()*;<>?[\\\]`{|}^~]/g, "\\$&");
+
+  /** Paths of what's dropped on a terminal: files from Finder etc., or one from the file tree. The webview only hands
+   * over the files' contents, so their paths come from the drag pasteboard; a file without one (an image from a
+   * browser) is saved to a temp folder first. */
+  async function droppedPaths(dt: DataTransfer): Promise<string[]> {
+    const tree = dt.getData("text/x-path");
+    if (tree) return [tree];
+    const files = [...dt.files];
+    if (!files.length) return [];
+    const known = await invoke<string[]>("drag_files").catch(() => [] as string[]);
+    return Promise.all(
+      files.map(
+        async (f) =>
+          known.find((p) => p.slice(p.lastIndexOf("/") + 1) === f.name) ??
+          invoke<string>("save_drop", await f.arrayBuffer(), { headers: { name: encodeURIComponent(f.name) } }),
+      ),
+    );
+  }
+
+  /** Type the dropped files' paths at the prompt, as a paste (agents like Claude Code pick up image paths from it). */
+  async function dropInto(tabId: string, paths: string[] | Promise<string[]>) {
+    const e = entries.get(tabId);
+    if (!e) return;
+    try {
+      const ps = await paths;
+      if (ps.length) e.term.paste(ps.map(shellEscape).join(" ") + " ");
+    } catch (err) {
+      e.term.write(`\r\n\x1b[31mCouldn't drop the file: ${err}\x1b[0m\r\n`);
+    }
+    e.term.focus();
+  }
+
+  // Screenshot thumbnails and other file promises get no `drop` here: the backend catches them (catch_promise_drops)
+  // and sends their paths. They go to the terminal the drag was last over, if that was just now.
+  let dragOver = { tabId: "", at: 0 };
+  listen<string[]>("promise-drop", ({ payload }) => {
+    if (dragOver.tabId && performance.now() - dragOver.at < 1000) dropInto(dragOver.tabId, payload);
+    dragOver.tabId = "";
+  });
+  const isFileDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.some((t) => t === "Files" || t === "text/x-path");
 
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {
     const host = document.createElement("div");
@@ -134,7 +178,22 @@
   });
 </script>
 
-<div class="term" bind:this={el}></div>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="term"
+  bind:this={el}
+  ondragover={(ev) => {
+    if (!isFileDrag(ev)) return;
+    ev.preventDefault();
+    ev.dataTransfer!.dropEffect = "copy";
+    dragOver = { tabId, at: performance.now() };
+  }}
+  ondrop={(ev) => {
+    if (!isFileDrag(ev)) return;
+    ev.preventDefault();
+    dropInto(tabId, droppedPaths(ev.dataTransfer!));
+  }}
+></div>
 
 <style>
   .term {
