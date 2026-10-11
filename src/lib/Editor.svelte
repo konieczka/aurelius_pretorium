@@ -9,7 +9,7 @@
   import { languages } from "@codemirror/language-data";
   import { tags as t } from "@lezer/highlight";
   import { blockLinks, renderMarkdown } from "./markdown";
-  import { app } from "./state.svelte";
+  import { app, openBrowserBeside } from "./state.svelte";
   import { findTab } from "./layout";
 
   // Editors outlive their component so unsaved edits survive tab moves.
@@ -17,6 +17,9 @@
   type Entry = { view?: EditorView; host: HTMLDivElement; error?: string; lang?: Compartment; wrap?: Compartment; stamp?: string | null; eol: string };
   type Opened = { text: string; stamp: string | null };
   const entries = new Map<string, Entry>();
+  // Drawings (.excalidraw) edit the text too: their latest edits, not yet written to it, and remounts on reload.
+  const flushes = new Map<string, () => void>();
+  const reloads = $state<Record<string, number>>({});
 
   export function disposeEditor(tabId: string) {
     entries.get(tabId)?.view?.destroy();
@@ -33,6 +36,7 @@
   export async function saveEditor(tabId: string): Promise<boolean> {
     const e = entries.get(tabId);
     if (!e?.view) return false;
+    flushes.get(tabId)?.();
     // The tab's path, not e.path: the file may have been moved since it was opened.
     const f = findTab(app.root, tabId);
     const tab = f?.pane.tabs[f.index];
@@ -77,6 +81,7 @@
     const cur = textOf(e);
     if (disk.text === cur) return;
     e.view.dispatch({ changes: { from: 0, to: e.view.state.doc.length, insert: disk.text }, annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)] });
+    reloads[tabId] = (reloads[tabId] ?? 0) + 1;
   }
 
   /** Has the file changed on disk since the editor read it? Checked every few seconds for the tab on screen: git
@@ -104,7 +109,13 @@
     app.dirty[tabId] = true; // the tab shows as unsaved before its editor opens
   }
   /** A tab's unsaved text, including a carried-over draft whose editor hasn't opened yet. */
-  export const draftOf = (tabId: string) => (entries.get(tabId)?.view ? (app.dirty[tabId] ? text(tabId) : undefined) : drafts.get(tabId));
+  export const draftOf = (tabId: string) => (flushes.get(tabId)?.(), entries.get(tabId)?.view ? (app.dirty[tabId] ? text(tabId) : undefined) : drafts.get(tabId));
+
+  /** A drawing's edit: the whole text, replaced (marks the tab unsaved). Not undoable here: the drawing has its undo. */
+  function setText(tabId: string, text: string) {
+    const v = entries.get(tabId)?.view;
+    v?.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text }, annotations: Transaction.addToHistory.of(false) });
+  }
 
   // Aurelius theme in CSS variables only, so light/dark switching restyles editors live.
   export const aurelius = [
@@ -200,7 +211,8 @@
   import { Check, ChevronDown, ChevronUp } from "@lucide/svelte";
   import { git, markResolved } from "./GitPanel.svelte";
   import Media from "./Media.svelte";
-  import { isSvg } from "./media";
+  import Excalidraw from "./Excalidraw.svelte";
+  import { isDrawing, isSvg } from "./media";
   let { tabId, path, preview, wrap }: { tabId: string; path: string; preview: boolean; wrap: boolean } = $props();
   let el: HTMLDivElement;
 
@@ -238,7 +250,8 @@
 
   // Sanitizing is mandatory: preview HTML runs in a window that can call the pty commands.
   const svg = $derived(isSvg(path));
-  const html = $derived(preview && !svg && app.dirty[tabId] !== undefined ? renderMarkdown(text(tabId)) : "");
+  const drawing = $derived(isDrawing(path));
+  const html = $derived(preview && !svg && !drawing && app.dirty[tabId] !== undefined ? renderMarkdown(text(tabId)) : "");
   // SVG preview draws the editor's text (unsaved edits too) as an <img>: scripts inside never run.
   const svgSrc = $derived(preview && svg && app.dirty[tabId] !== undefined ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text(tabId))}` : "");
 </script>
@@ -256,7 +269,19 @@
     {/if}
   </div>
 {/if}
-{#if preview && svg}
+{#if preview && drawing}
+  {#if app.dirty[tabId] !== undefined && !entries.get(tabId)?.error}
+    {#key reloads[tabId]}
+      <Excalidraw
+        source={text(tabId)}
+        onedit={() => (app.dirty[tabId] = true)}
+        oncommit={(json) => setText(tabId, json)}
+        onlink={(url) => openBrowserBeside(url, tabId)}
+        register={(flush) => (flush ? flushes.set(tabId, flush) : flushes.delete(tabId))}
+      />
+    {/key}
+  {/if}
+{:else if preview && svg}
   {#if svgSrc}{#key svgSrc}<Media {path} src={svgSrc} />{/key}{/if}
 {:else if preview}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

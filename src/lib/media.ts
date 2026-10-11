@@ -12,5 +12,6 @@ export function mediaKind(path: string): "image" | "video" | "audio" | "model" |
 }
 
 export const isSvg = (path: string) => ext(path) === "svg";
-/** Text files with a rendered view next to the code (⌘E toggles). */
-export const hasPreview = (path: string) => ["md", "markdown", "svg"].includes(ext(path));
+export const isDrawing = (path: string) => ext(path) === "excalidraw";
+/** Text files with a rendered view next to the code (⌘E toggles). A drawing's view edits it. */
+export const hasPreview = (path: string) => ["md", "markdown", "svg", "excalidraw"].includes(ext(path));
