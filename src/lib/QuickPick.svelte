@@ -18,6 +18,8 @@
   }
   /** Resolves to the chosen item's value, or null if dismissed. */
   export const pick = (placeholder: string, items: Item[], remove?: (value: string) => void) => show(placeholder, items, "", remove);
+  /** It's on screen (browser tabs hide their pages, which would cover it). */
+  export const picking = () => quick.open;
   /** Resolves to the entered text (trimmed, non-empty), or null if dismissed. */
   export const prompt = (placeholder: string, value = "") => show(placeholder, null, value);
 </script>

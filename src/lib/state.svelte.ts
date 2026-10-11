@@ -3,6 +3,7 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
 import { disposeTerm, queueInput } from "./Terminal.svelte";
 import { disposeEditor } from "./Editor.svelte";
+import { disposeBrowser, focusAddress } from "./Browser.svelte";
 import { hasPreview } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
@@ -54,8 +55,8 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + "/"
 /** The opened folder a path belongs to (deepest match); if none, the path itself for a folder, else its parent dir. */
 export const ownerOf = (path: string, dir = false) =>
   app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? (dir ? path : path.slice(0, path.lastIndexOf("/")));
-const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.path);
-/** Folder a tab belongs to ("" for an unsaved note). A terminal's follows its shell's `cd`. */
+const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" ? "" : t.path);
+/** Folder a tab belongs to ("" for an unsaved note or a web page). A terminal's follows its shell's `cd`. */
 export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t), t.kind === "term") : "");
 /** Folder a tab belongs to, or "" when it's in the current workspace. */
 export function foreignOwner(t: L.Tab) {
@@ -137,6 +138,26 @@ export function newNote() {
   const p = focusedPane();
   p.tabs.push({ id: L.uid(), kind: "file", path: "" });
   p.active = p.tabs.length - 1;
+}
+
+/** Browser tab in the focused pane, or right after tab `after` in its pane. No `url`: its address bar waits for one. */
+export function openBrowser(url = "", after?: string) {
+  closeViews();
+  const at = after ? L.findTab(app.root, after) : null;
+  const p = at?.pane ?? focusedPane();
+  const t: L.Tab = { id: L.uid(), kind: "web", url };
+  p.tabs.splice(at ? at.index + 1 : p.tabs.length, 0, t);
+  p.active = p.tabs.indexOf(t);
+  app.focused = p.id;
+  if (!url) setTimeout(() => focusAddress(t.id)); // once it's mounted
+}
+
+/** Browser tab in a new pane to the right of tab `beside`'s (a link opened from a terminal). */
+export function openBrowserBeside(url: string, beside: string) {
+  const at = L.findTab(app.root, beside);
+  if (!at) return openBrowser(url);
+  closeViews();
+  app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url }).id;
 }
 
 /** New terminal tab in the focused pane that runs `command` once its shell starts. */
@@ -226,9 +247,10 @@ export function restoreTab(tabId: string) {
   app.focused = L.restore(app.root, m).id;
 }
 
-/** Drop a tab's view; `kill = false` leaves a terminal's shell running (its workspace moved or was closed). */
+/** Drop a tab's view; `kill = false` leaves a terminal's shell or a page running (its workspace moved or was closed). */
 export function dispose(t: L.Tab, kill = true) {
   if (t.kind === "term") disposeTerm(t.id, kill);
+  else if (t.kind === "web") disposeBrowser(t.id, kill);
   else if (t.kind === "file") disposeEditor(t.id);
   delete app.dirty[t.id];
   delete app.titles[t.id];
@@ -365,7 +387,8 @@ export async function paste(dir: string) {
   }
 }
 
-export const copyText = (text: string) => navigator.clipboard.writeText(text).catch(fail);
+/** Resolves to whether it worked (a failure is shown). */
+export const copyText = (text: string) => navigator.clipboard.writeText(text).then(() => true, (e) => (fail(e), false));
 
 export async function deleteSelected() {
   const path = app.selectedPath;

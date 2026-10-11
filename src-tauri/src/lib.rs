@@ -11,6 +11,7 @@ mod agent_config;
 mod skills;
 mod status;
 mod usage;
+mod web;
 
 struct Session {
     // Input for the shell, written by its own thread: a write blocks while the program in the terminal isn't
@@ -392,7 +393,8 @@ fn mouse_down() -> bool {
 
 /// The window (other than `skip`) whose title bar or workspace bar (~40 logical px under the title bar) is under `c`.
 fn bar_under(app: &AppHandle, c: PhysicalPosition<f64>, skip: &str) -> Option<String> {
-    app.webview_windows().into_iter().find_map(|(label, w)| {
+    // Windows, not webview windows: one showing a browser tab has more than one webview, and Tauri lists it only here
+    app.windows().into_iter().find_map(|(label, w)| {
         let (p, s, inner, k) = (w.outer_position().ok()?, w.outer_size().ok()?, w.inner_position().ok()?, w.scale_factor().ok()?);
         let hit = label != skip
             && c.x >= p.x as f64
@@ -401,6 +403,14 @@ fn bar_under(app: &AppHandle, c: PhysicalPosition<f64>, skip: &str) -> Option<St
             && c.y < inner.y as f64 + 44.0 * k; // the top bar (also the title bar: overlay style, so inner = outer)
         hit.then_some(label)
     })
+}
+
+/// A menu shortcut for the app's page to run (`browser`: the browser tab that had the keyboard).
+#[derive(Clone, serde::Serialize)]
+struct Shortcut<'a> {
+    key: &'a str,
+    shift: bool,
+    browser: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -415,7 +425,7 @@ struct TearDrop {
 /// Shown afterwards, it just appears, in the full-screen space.
 #[tauri::command]
 async fn show_window(app: AppHandle, label: String) -> Res<()> {
-    app.get_webview_window(&label).ok_or("no such window")?.show().map_err(err)
+    app.get_window(&label).ok_or("no such window")?.show().map_err(err)
 }
 
 /// Tab tear-off: window `label` (holding workspace `id`) follows the cursor at offset dx, dy (physical px) until the
@@ -429,7 +439,7 @@ fn follow_cursor(app: AppHandle, label: String, id: String, source: String, dx: 
         let mut hover: Option<String> = None;
         let mut shown = false; // a new follower is opened hidden (see show_window): shown once it exists
         loop {
-            if let (Ok(c), Some(w)) = (app.cursor_position(), app.get_webview_window(&label)) {
+            if let (Ok(c), Some(w)) = (app.cursor_position(), app.get_window(&label)) {
                 let _ = w.set_position(PhysicalPosition::new(c.x - dx, c.y - dy));
                 if !shown {
                     shown = true;
@@ -458,7 +468,7 @@ fn follow_cursor(app: AppHandle, label: String, id: String, source: String, dx: 
         // Released before the new window existed (a quick flick): it still has to be seen, unless it's merging.
         if !shown && hover.is_none() {
             for _ in 0..250 {
-                if let Some(w) = app.get_webview_window(&label) {
+                if let Some(w) = app.get_window(&label) {
                     let _ = w.show();
                     break;
                 }
@@ -912,7 +922,7 @@ fn stay_awake(on: Option<bool>, awake: State<Awake>, app: AppHandle) -> Res<bool
 }
 
 /// Reload bypassing the cache (WKWebView's reloadFromOrigin); plain reload elsewhere.
-fn force_reload(w: &tauri::WebviewWindow) {
+fn force_reload(w: &tauri::Webview) {
     #[cfg(target_os = "macos")]
     let _ = w.with_webview(|wv| unsafe {
         let wv = &*(wv.inner() as *const objc2::runtime::AnyObject);
@@ -956,7 +966,7 @@ async fn quit(app: AppHandle, ptys: State<'_, Ptys>, restart: Option<bool>) -> R
 }
 
 /// Windows only ever show the app itself. A link or form in previewed markdown (a repo's README) must not be able to
-/// navigate one to a remote page, which would then run inside the app's window.
+/// navigate one to a remote page, which would then run inside the app's window. (Browser tabs have their own rules: web.rs.)
 fn app_url(url: &tauri::Url) -> bool {
     match url.scheme() {
         "tauri" | "about" => true,
@@ -970,7 +980,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard").on_navigation(|_, url| app_url(url)).build())
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard").on_navigation(|w, url| w.label().starts_with(web::PREFIX) || app_url(url)).build())
         // Default macOS menu binds ⌘W to Close Window; we want it for tabs.
         .menu(|h| {
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
@@ -981,12 +991,22 @@ pub fn run() {
                     &P::about(h, None, None)?, &MenuItem::with_id(h, "check-updates", "Check for Updates…", true, None::<&str>)?,
                     &P::separator(h)?, &P::hide(h, None)?, &item("quit", "Quit Pretorium", "CmdOrCtrl+Q")?,
                 ])?,
+                // The app's own shortcuts, handled by its page (+page.svelte). Here so they also work while a browser tab
+                // has the keyboard: a page sees a key first and only what it leaves reaches the menu.
+                &Submenu::with_items(h, "File", true, &[
+                    &item("key:t", "New Terminal", "CmdOrCtrl+T")?, &item("key:shift+t", "New Browser Tab", "CmdOrCtrl+Shift+T")?,
+                    &item("key:n", "New Note", "CmdOrCtrl+N")?, &P::separator(h)?,
+                    &item("key:o", "Open Folder…", "CmdOrCtrl+O")?, &item("key:p", "Switch Folder…", "CmdOrCtrl+P")?, &P::separator(h)?,
+                    &item("key:w", "Close Tab", "CmdOrCtrl+W")?,
+                ])?,
                 &Submenu::with_items(h, "Edit", true, &[
                     &P::undo(h, None)?, &P::redo(h, None)?, &P::separator(h)?,
                     &P::cut(h, None)?, &P::copy(h, None)?, &P::paste(h, None)?, &P::select_all(h, None)?,
                 ])?,
                 &Submenu::with_items(h, "View", true, &[
                     &item("reload", "Reload", "CmdOrCtrl+R")?, &item("force-reload", "Force Reload", "CmdOrCtrl+Shift+R")?, &P::separator(h)?,
+                    &item("key:b", "Toggle Sidebar", "CmdOrCtrl+B")?, &item("key:d", "Split Right", "CmdOrCtrl+D")?, &item("key:shift+d", "Split Down", "CmdOrCtrl+Shift+D")?, &P::separator(h)?,
+                    &item("key:l", "Open Location", "CmdOrCtrl+L")?, &item("key:[", "Back", "CmdOrCtrl+[")?, &item("key:]", "Forward", "CmdOrCtrl+]")?, &P::separator(h)?,
                     &item("zoom-reset", "Actual Size", "CmdOrCtrl+0")?, &item("zoom-in", "Zoom In", "CmdOrCtrl+=")?, &item("zoom-out", "Zoom Out", "CmdOrCtrl+-")?,
                 ])?,
                 &Submenu::with_items(h, "Window", true, &[&P::minimize(h, None)?, &P::fullscreen(h, None)?])?,
@@ -995,7 +1015,7 @@ pub fn run() {
         .on_menu_event(|h, e| {
             if let id @ ("quit" | "check-updates") = e.id().as_ref() {
                 // One window runs these (the focused one, else any); with none left there's nothing to ask about.
-                let windows = h.webview_windows();
+                let windows = h.windows();
                 let w = windows.values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| windows.values().next());
                 let event = if id == "quit" { "quit-requested" } else { "check-updates" };
                 match w {
@@ -1005,12 +1025,26 @@ pub fn run() {
                 }
                 return;
             }
-            let Some(w) = h.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) else { return };
+            let Some(w) = h.windows().into_values().find(|w| w.is_focused().unwrap_or(false)) else { return };
+            let browser = web::focused(h, &w); // a browser tab has the keyboard (menu events come on the main thread)
+            if let Some(key) = e.id().as_ref().strip_prefix("key:") {
+                // Back/Forward stay in the browser; anything else acts on the app, which takes the keyboard back
+                if browser.is_some() && !matches!(key, "[" | "]") {
+                    web::focus_app(h, w.label());
+                }
+                let (shift, key) = key.strip_prefix("shift+").map_or((false, key), |k| (true, k));
+                let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), "shortcut", Shortcut { key, shift, browser });
+                return;
+            }
+            let Some(page) = h.get_webview(w.label()) else { return };
             match e.id().as_ref() {
-                "reload" => { let _ = w.reload(); }
-                "force-reload" => force_reload(&w),
+                "reload" => match browser.and_then(|id| h.get_webview(&format!("{}{id}", web::PREFIX))) {
+                    Some(b) => { let _ = b.reload(); }
+                    None => { let _ = page.reload(); }
+                },
+                "force-reload" => force_reload(&page),
                 // Zoom level lives in the frontend (persisted, and read back for drag math).
-                id @ ("zoom-in" | "zoom-out" | "zoom-reset") => { let _ = h.emit_to(tauri::EventTarget::webview_window(w.label()), "zoom", id); }
+                id @ ("zoom-in" | "zoom-out" | "zoom-reset") => { let _ = h.emit_to(tauri::EventTarget::webview_window(page.label()), "zoom", id); }
                 _ => {}
             }
         })
@@ -1025,9 +1059,11 @@ pub fn run() {
             Ok(())
         })
         .manage(Ptys::default())
+        .manage(web::Views::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set,
+            web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

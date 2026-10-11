@@ -6,6 +6,7 @@
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
+  import Toast from "$lib/Toast.svelte";
   import FileTree, { treeMenu } from "$lib/FileTree.svelte";
   import { hasPreview } from "$lib/media";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
@@ -14,6 +15,9 @@
   import { watchAgents } from "$lib/agents.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
+  import { browserGo, focusAddress } from "$lib/Browser.svelte";
+  import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import * as L from "$lib/layout";
   import Usage from "$lib/Usage.svelte";
   import { closeUsage, toggleUsage, usage, warmUsage } from "$lib/usageView.svelte";
   import Skills from "$lib/Skills.svelte";
@@ -25,10 +29,17 @@
   import Settings from "$lib/Settings.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openWorkspace, splitFocused, startCreate, toggleSidebar,
+    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleSidebar,
   } from "$lib/state.svelte";
 
   initWorkspaces();
+  // A shortcut pressed while a browser tab's page had the keyboard comes through the app menu (see lib.rs): it acts
+  // as if pressed here, on that tab's pane.
+  getCurrentWebviewWindow().listen<{ key: string; shift: boolean; browser: string | null }>("shortcut", ({ payload: p }) => {
+    const f = p.browser && L.findTab(app.root, p.browser);
+    if (f) (app.focused = f.pane.id), (f.pane.active = f.index);
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: p.key, metaKey: true, shiftKey: p.shift, bubbles: true }));
+  });
   initUpdates();
   warmUsage();
   $effect(save);
@@ -93,7 +104,12 @@
       k === "j" && e.shiftKey ? toggleFleet :
       k === "w" && fleet.open ? closeFleet :
       k === "s" && agents.open ? saveAgentFile :
+      k === "t" && e.shiftKey ? () => openBrowser() :
       k === "t" ? newTerminal :
+      // Elsewhere ⌘L, ⌘[ and ⌘] are the editor's (select line, indent)
+      k === "l" && t?.kind === "web" ? () => focusAddress(t.id) :
+      k === "[" && t?.kind === "web" ? () => browserGo(t.id, -1) :
+      k === "]" && t?.kind === "web" ? () => browserGo(t.id, 1) :
       k === "n" ? newNote :
       k === "d" ? () => splitFocused(e.shiftKey ? "col" : "row") :
       k === "w" ? () => t && closeTab(t.id) :
@@ -170,6 +186,7 @@
     <StatusBar />
   </div>
   <QuickPick />
+  <Toast />
 {:else}
   <div class="welcome">
     <span class="mark big"></span>

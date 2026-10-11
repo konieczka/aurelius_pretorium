@@ -3,24 +3,27 @@
   import { agentProvider } from "./agents.svelte";
   import { providerName } from "./usageStats";
   import type { Tab } from "./layout";
+  import { hostOf } from "./web";
 
   export const tabLabel = (t: Tab) =>
     t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
+    t.kind === "web" ? t.title || (t.url ? hostOf(t.url) : "New Tab") :
     t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
     t.name || (t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] : app.titles[t.id] || "Terminal");
 </script>
 
 <script lang="ts">
   import { popupMenu, sep } from "./contextMenu";
-  import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, NotebookPen, Pencil, Rows2, SquareTerminal, TextWrap, X } from "@lucide/svelte";
+  import { Columns2, Eye, Folder, FolderGit2, GitBranch, GitCompare, GitFork, Globe, NotebookPen, Pencil, Rows2, SquareTerminal, TextWrap, X } from "@lucide/svelte";
   import type { Pane } from "./layout";
   import { dockTab, moveTab, type Side } from "./layout";
-  import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
+  import { closeTab, foreignOwner, minimizeTab, newNote, newTerminal, openBrowser, refreshRepo, splitFocused, tabOwner } from "./state.svelte";
   import { moveTabTo, ws } from "./workspaces.svelte";
   import Terminal from "./Terminal.svelte";
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
   import Media from "./Media.svelte";
+  import Browser from "./Browser.svelte";
   import { hasPreview, mediaKind } from "./media";
   import ProviderIcon from "./ProviderIcon.svelte";
   import { activity } from "./agents.svelte";
@@ -70,6 +73,7 @@
     const project = base(repo?.main || root);
     // Worktrees made here are named <main>-<branch>; the prefix just repeats the project
     const wt = !repo?.main ? "" : base(root).startsWith(project + "-") ? base(root).slice(project.length + 1) : base(root);
+    if (tab.kind === "web") return null; // no folder: the page has its own address bar
     const full = tab.kind === "term" ? tab.cwd : tab.path;
     const rel = full.startsWith(root + "/") ? full.slice(root.length + 1) : full === root ? "" : full;
     const branch = repo?.branch ?? "";
@@ -179,7 +183,7 @@
         class="tab"
         class:active={i === pane.active}
         draggable={renaming !== t.id}
-        title={t.kind === "term" ? t.cwd : t.path}
+        title={t.kind === "term" ? t.cwd : t.kind === "web" ? t.url : t.path}
         onclick={() => (pane.active = i)}
         onauxclick={(e) => e.button === 1 && closeTab(t.id)}
         oncontextmenu={(e) => tabMenu(e, t)}
@@ -188,7 +192,7 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if t.kind === "web"}<Globe size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         {#if renaming === t.id}
           <input
             class="rename"
@@ -212,11 +216,12 @@
     </div>
     <button class="icon-btn" onclick={here(newNote)} title="New note (⌘N)"><NotebookPen size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(newTerminal)} title="New terminal (⌘T)"><SquareTerminal size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={here(() => openBrowser())} title="New browser tab (⇧⌘T)"><Globe size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("row"))} title="Split right (⌘D)"><Columns2 size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={here(() => splitFocused("col"))} title="Split down (⇧⌘D)"><Rows2 size={14} strokeWidth={1.5} /></button>
   </div>
   {#if where}
-    <div class="where" title={(tab.kind === "term" ? tab.cwd : tab.path) + (where.foreign ? "\nNot the folder in the sidebar" : "")}>
+    <div class="where" title={(tab.kind === "term" ? tab.cwd : tab.kind === "web" ? tab.url : tab.path) + (where.foreign ? "\nNot the folder in the sidebar" : "")}>
       <span class="seg project">{#if where.git}<FolderGit2 size={12} strokeWidth={1.5} />{:else}<Folder size={12} strokeWidth={1.5} />{/if}{where.project}</span>
       {#if where.wt}<span class="seg" title="Worktree: {repo?.root}"><GitFork size={12} strokeWidth={1.5} />{where.wt}</span>{/if}
       {#if where.branch}<span class="seg" title="Branch"><GitBranch size={12} strokeWidth={1.5} />{where.branch}</span>{/if}
@@ -240,6 +245,8 @@
       {#key tab.id}
         {#if tab.kind === "term"}
           <Terminal tabId={tab.id} cwd={tab.cwd} />
+        {:else if tab.kind === "web"}
+          <Browser {tab} />
         {:else if tab.kind === "diff"}
           <Diff path={tab.path} staged={tab.staged} orig={tab.orig} ref={tab.ref} />
         {:else if mediaKind(tab.path)}

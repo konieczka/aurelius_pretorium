@@ -6,7 +6,9 @@ export type Tab =
   | { id: string; kind: "term"; cwd: string; agent?: string; name?: string }
   | { id: string; kind: "file"; path: string; preview?: boolean; wrap?: boolean /* on unless false */ }
   // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree)
-  | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string };
+  | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string }
+  // url "" = a new tab waiting for an address; title = the page's, last seen
+  | { id: string; kind: "web"; url: string; title?: string };
 export type Pane = { id: string; type: "pane"; tabs: Tab[]; active: number };
 export type Split = { id: string; type: "split"; dir: "row" | "col"; children: LNode[]; sizes: number[] };
 export type LNode = Pane | Split;
@@ -182,7 +184,7 @@ export function restore(root: Split, m: Minimized): Pane {
 type Raw = any;
 const str = (v: unknown) => typeof v === "string";
 export const isTab = (t: Raw): t is Tab =>
-  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : (t.kind === "file" || t.kind === "diff") && str(t.path));
+  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : (t.kind === "file" || t.kind === "diff") && str(t.path));
 function isNode(n: Raw): n is LNode {
   if (n?.type === "pane") return str(n.id) && Array.isArray(n.tabs) && n.tabs.every(isTab) && Number.isInteger(n.active);
   return (

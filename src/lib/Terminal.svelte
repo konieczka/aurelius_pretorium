@@ -6,7 +6,8 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import "@xterm/xterm/css/xterm.css";
-  import { app } from "./state.svelte";
+  import { app, copyText, openBrowserBeside } from "./state.svelte";
+  import { toast } from "./Toast.svelte";
   import { cssHex, theme } from "./theme.svelte";
   import { relaunchCommand } from "./agents.svelte";
   import * as L from "./layout";
@@ -103,9 +104,10 @@
   });
   const isFileDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.some((t) => t === "Files" || t === "text/x-path");
 
-  // Cmd+click, as in Terminal/iTerm: a plain click stays free for selecting text.
-  function openLink(ev: MouseEvent, uri: string) {
-    if (ev.metaKey) invoke("open_url", { url: uri }).catch(() => {});
+  // Click copies the link; Cmd+click opens it in a browser tab in a new pane to the right. Dragging across one still selects.
+  function linkClicked(tabId: string, ev: MouseEvent, uri: string) {
+    if (!ev.metaKey) copyText(uri).then((ok) => ok && toast("Link copied", ev.clientX, ev.clientY));
+    else if (/^https?:\/\//i.test(uri)) openBrowserBeside(uri, tabId); // OSC 8 links can be anything: web pages only
   }
 
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {
@@ -121,11 +123,11 @@
       allowProposedApi: true,
       macOptionIsMeta: true,
       // OSC 8 hyperlinks (ls --hyperlink, gh, agents); plain-text URLs go through WebLinksAddon below.
-      linkHandler: { activate: openLink },
+      linkHandler: { activate: (ev, uri) => linkClicked(tabId, ev, uri) },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon(openLink));
+    term.loadAddon(new WebLinksAddon((ev, uri) => linkClicked(tabId, ev, uri)));
     term.open(host);
     try {
       const gl = new WebglAddon();
