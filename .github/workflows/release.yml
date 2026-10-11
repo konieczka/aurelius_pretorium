@@ -57,6 +57,22 @@ jobs:
             [ -n "${!v}" ] || { echo "::error::Missing repository secret $v"; missing=1; }
           done
           exit $missing
+      # Fails in seconds, not after the build, when the .p12 and its password don't go together or hold the wrong identity.
+      - name: Check the certificate imports
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          dir=$(mktemp -d); kc=$dir/check.keychain-db
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$dir/cert.p12"
+          security create-keychain -p check "$kc"
+          security import "$dir/cert.p12" -k "$kc" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign \
+            || { echo "::error::APPLE_CERTIFICATE_PASSWORD doesn't unlock APPLE_CERTIFICATE (or the .p12 has an empty password)"; exit 1; }
+          echo "Identities in the .p12:"; security find-identity -p codesigning "$kc" | sed 's/[0-9A-F]\{40\}/<hash>/'
+          security find-identity -p codesigning "$kc" | grep -qF "\"$APPLE_SIGNING_IDENTITY\"" \
+            || { echo "::error::APPLE_SIGNING_IDENTITY isn't one of those (or the .p12 lacks the private key)"; exit 1; }
+          security delete-keychain "$kc"; rm -rf "$dir"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
