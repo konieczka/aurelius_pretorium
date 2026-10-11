@@ -810,6 +810,22 @@ fn reveal_path(path: String) -> Res<()> {
     cmd.spawn().map(|_| ()).map_err(err)
 }
 
+/// Open a link from a terminal in the default browser. Web links only: OSC 8 lets programs put any URI there.
+#[tauri::command]
+fn open_url(url: String) -> Res<()> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(format!("not a web link: {url}"));
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(&url).spawn().map(|_| ()).map_err(err)
+}
+
 /// Move `path` into a fresh subfolder of `dir` (the undo holding area) and return where it went.
 fn hold(path: &Path, dir: &Path) -> std::io::Result<PathBuf> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -1011,7 +1027,7 @@ pub fn run() {
         .manage(Ptys::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
+  import { WebLinksAddon } from "@xterm/addon-web-links";
   import "@xterm/xterm/css/xterm.css";
   import { app } from "./state.svelte";
   import { cssHex, theme } from "./theme.svelte";
@@ -102,6 +103,11 @@
   });
   const isFileDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.some((t) => t === "Files" || t === "text/x-path");
 
+  // Cmd+click, as in Terminal/iTerm: a plain click stays free for selecting text.
+  function openLink(ev: MouseEvent, uri: string) {
+    if (ev.metaKey) invoke("open_url", { url: uri }).catch(() => {});
+  }
+
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {
     const host = document.createElement("div");
     host.className = "term-host";
@@ -114,9 +120,12 @@
       cursorBlink: true,
       allowProposedApi: true,
       macOptionIsMeta: true,
+      // OSC 8 hyperlinks (ls --hyperlink, gh, agents); plain-text URLs go through WebLinksAddon below.
+      linkHandler: { activate: openLink },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon(openLink));
     term.open(host);
     try {
       const gl = new WebglAddon();
