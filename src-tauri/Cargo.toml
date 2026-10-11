@@ -28,6 +28,7 @@ ureq = "3"
 toml_edit = "0.25.17"
 jsonc-parser = { version = "0.34.0", features = ["serde", "cst"] }
 libc = "0.2"
+base64 = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

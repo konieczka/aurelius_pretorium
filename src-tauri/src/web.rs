@@ -36,6 +36,100 @@ fn emit_state(wv: &Webview, url: &Url, title: Option<String>, loading: Option<bo
     let _ = wv.app_handle().emit("web-state", State { id, url: url.to_string(), title, loading });
 }
 
+// The page's best icon for a 13px tab: an SVG, else the smallest at least 32px (sharp at 2x), else the biggest; ones
+// for the other color scheme are skipped. Without one, browsers try /favicon.ico.
+const ICON_JS: &str = r#"(() => {
+  const size = (l) => /svg/i.test(l.type) || /\.svg(\?|#|$)/i.test(l.href) || /any/i.test(l.sizes.value) ? 0
+    : Math.max(16, ...[...l.sizes].map((s) => parseInt(s) || 0));
+  const rank = (n) => (n === 0 ? 0 : n >= 32 ? n : 1e4 - n);
+  const links = [...document.querySelectorAll('link[rel~="icon" i]')]
+    .filter((l) => l.href && (!l.media || matchMedia(l.media).matches))
+    .sort((a, b) => rank(size(a)) - rank(size(b)));
+  return links.length ? links[0].href : location.origin + "/favicon.ico";
+})()"#;
+
+/// Icon address -> what it came to (a data: URL, or None: there was nothing usable there). Pages share icons.
+static ICONS: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
+
+#[derive(Clone, serde::Serialize)]
+struct Icon {
+    id: String,
+    /// The page it's for: an answer that lands after the tab moved on is dropped.
+    url: String,
+    icon: Option<String>,
+}
+
+/// Ask the page for its icon, fetch it (off the main thread) and send it to the tab as a data: URL, which the app's
+/// CSP allows where it wouldn't the site's own address.
+fn find_icon(wv: &Webview) {
+    let Ok(page) = wv.url() else { return };
+    if !matches!(page.scheme(), "http" | "https") {
+        return;
+    }
+    let (app, id) = (wv.app_handle().clone(), wv.label().trim_start_matches(PREFIX).to_string());
+    let _ = wv.eval_with_callback(ICON_JS, move |json| {
+        // What the page answers is the page's to make up: only an http(s) or data: image address is taken.
+        let Some(href) = serde_json::from_str::<String>(&json).ok() else { return };
+        let (app, id, page) = (app.clone(), id.clone(), page.to_string());
+        std::thread::spawn(move || {
+            let cached = ICONS.lock().unwrap().get_or_insert_default().get(&href).cloned();
+            let icon = cached.unwrap_or_else(|| {
+                let icon = fetch_icon(&href);
+                let mut icons = ICONS.lock().unwrap();
+                let icons = icons.get_or_insert_default();
+                if icons.len() > 500 {
+                    icons.clear();
+                }
+                icons.insert(href, icon.clone());
+                icon
+            });
+            let _ = app.emit("web-icon", Icon { id, url: page, icon });
+        });
+    });
+}
+
+const ICON_MAX: u64 = 256 * 1024;
+
+fn fetch_icon(href: &str) -> Option<String> {
+    use base64::Engine;
+    if let Some(data) = href.strip_prefix("data:") {
+        return (data.starts_with("image/") && href.len() as u64 <= ICON_MAX).then(|| href.to_string());
+    }
+    let url: Url = href.parse().ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let mut res = ureq::get(url.as_str())
+        .header("User-Agent", USER_AGENT)
+        .config()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .call()
+        .ok()?;
+    let declared = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").split(';').next()?.trim().to_lowercase();
+    let body = res.body_mut().with_config().limit(ICON_MAX).read_to_vec().ok()?;
+    let kind = icon_type(&declared, &body)?;
+    Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(&body)))
+}
+
+/// The image type to label it with, or None if it isn't one: servers send icons as octet-stream, or send an HTML page
+/// (a 404 dressed as 200) where /favicon.ico should be.
+fn icon_type(declared: &str, body: &[u8]) -> Option<&'static str> {
+    let sniffed = match body {
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [0, 0, 1, 0, ..] => Some("image/x-icon"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    };
+    let svg = || {
+        let head = String::from_utf8_lossy(&body[..body.len().min(1024)]).to_lowercase();
+        (head.contains("<svg") && !head.contains("<html")).then_some("image/svg+xml")
+    };
+    sniffed.or_else(|| (declared == "image/svg+xml" || declared.starts_with("text/") || declared.is_empty()).then(svg).flatten())
+}
+
 /// The app's own pages (the dev server while developing) mustn't open in a tab: they'd count as the app, IPC included.
 fn is_app(app: &AppHandle, url: &Url) -> bool {
     cfg!(dev) && app.config().build.dev_url.as_ref().is_some_and(|d| d.origin() == url.origin())
@@ -105,12 +199,19 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
             let _ = opener.emit("web-open", (&from, u.to_string()));
             tauri::webview::NewWindowResponse::Deny
         })
-        .on_page_load(|wv, p| emit_state(&wv, p.url(), None, Some(matches!(p.event(), tauri::webview::PageLoadEvent::Started))))
+        .on_page_load(|wv, p| {
+            let started = matches!(p.event(), tauri::webview::PageLoadEvent::Started);
+            emit_state(&wv, p.url(), None, Some(started));
+            if !started {
+                find_icon(&wv);
+            }
+        })
         // Also how in-page navigation (history.pushState) shows: single-page apps retitle on it
         .on_document_title_changed(|wv, title| {
             if let Ok(u) = wv.url() {
                 emit_state(&wv, &u, Some(title), None);
             }
+            find_icon(&wv); // single-page apps can swap it as they go
         });
     let wv = window.add_child(builder, pos, size).map_err(err)?;
     #[cfg(target_os = "macos")]
@@ -223,3 +324,20 @@ pub fn focus_app(app: &AppHandle, window: &str) {
         let _ = wv.set_focus();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::icon_type;
+
+    #[test]
+    fn icons_are_told_by_their_bytes() {
+        assert_eq!(icon_type("application/octet-stream", b"\x89PNG\r\n"), Some("image/png"));
+        assert_eq!(icon_type("image/vnd.microsoft.icon", &[0, 0, 1, 0, 1]), Some("image/x-icon"));
+        assert_eq!(icon_type("image/svg+xml", b"<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>"), Some("image/svg+xml"));
+        assert_eq!(icon_type("text/plain", b"<svg viewBox=\"0 0 1 1\"/>"), Some("image/svg+xml"));
+        // A missing /favicon.ico answered with the site's HTML page
+        assert_eq!(icon_type("text/html", b"<!doctype html><html><svg/></html>"), None);
+        assert_eq!(icon_type("image/png", b"not an image"), None);
+    }
+}
+

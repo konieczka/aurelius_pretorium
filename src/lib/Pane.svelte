@@ -23,7 +23,7 @@
   import Editor from "./Editor.svelte";
   import Diff from "./Diff.svelte";
   import Media from "./Media.svelte";
-  import Browser from "./Browser.svelte";
+  import Browser, { icons } from "./Browser.svelte";
   import { hasPreview, mediaKind } from "./media";
   import ProviderIcon from "./ProviderIcon.svelte";
   import { activity } from "./agents.svelte";
@@ -193,7 +193,7 @@
         ondragend={() => (app.dragging = false)}
         ondrop={(e) => drop(e, i)}
       >
-        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if t.kind === "web"}<Globe size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
+        {#if t.kind === "term" && t.agent && agentProvider[t.agent]}<span class="agent" class:working={activity[t.id] === "busy"} title={activity[t.id] === "busy" ? "Working" : undefined}><ProviderIcon provider={agentProvider[t.agent]} size={13} /></span>{:else if t.kind === "term"}<SquareTerminal size={13} strokeWidth={1.5} />{:else if t.kind === "diff"}<GitCompare size={13} strokeWidth={1.5} />{:else if t.kind === "web" && icons[t.id]}<img class="favicon" src={icons[t.id].src} alt="" onerror={() => delete icons[t.id]} />{:else if t.kind === "web"}<Globe size={13} strokeWidth={1.5} />{:else if !t.path}<NotebookPen size={13} strokeWidth={1.5} />{/if}
         {#if renaming === t.id}
           <input
             class="rename"
@@ -375,6 +375,13 @@
   }
   /* Agent state: while it works its icon breathes, with a dot pulsing beneath in step; an ember dot after the name
      when it's done or asking while you were elsewhere */
+  .favicon {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    object-fit: contain;
+    border-radius: 2px;
+  }
   .agent {
     position: relative;
     display: flex;

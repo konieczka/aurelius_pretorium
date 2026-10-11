@@ -13,6 +13,9 @@
   const webTab = (id: string) => allTabs().find((t): t is WebTab => t.id === id && t.kind === "web");
 
   const loading = $state<Record<string, boolean>>({}); // tab id -> page loading
+  /** Tab id -> its page's icon (a data: URL) and the origin it's for. Not saved: pages send it again as they load. */
+  export const icons = $state<Record<string, { src: string; origin: string }>>({});
+  const originOf = (url: string) => URL.parse(url)?.origin ?? "";
   const inputs = new Map<string, HTMLInputElement>(); // tab id -> its address bar, while shown
 
   // Calls that place, hide or close a tab's view go one at a time, latest wins: dragging a split sends one per frame,
@@ -36,6 +39,7 @@
   export function disposeBrowser(id: string, kill = true) {
     send(id, () => invoke(kill ? "web_close" : "web_hide", { id }));
     delete loading[id];
+    delete icons[id];
   }
 
   export function focusAddress(id: string) {
@@ -54,6 +58,14 @@
     if (p.url && p.url !== "about:blank") t.url = p.url;
     if (p.title !== undefined) t.title = p.title || undefined;
     if (p.loading !== undefined) loading[p.id] = p.loading;
+    // Off to another site: its icon isn't this one (it sends its own once it has loaded)
+    if (p.loading && icons[p.id] && originOf(p.url) !== icons[p.id].origin) delete icons[p.id];
+  });
+  listen<{ id: string; url: string; icon: string | null }>("web-icon", ({ payload: p }) => {
+    const t = webTab(p.id);
+    if (!t || originOf(p.url) !== originOf(t.url)) return; // late: the tab has moved on
+    if (p.icon) icons[p.id] = { src: p.icon, origin: originOf(p.url) };
+    else delete icons[p.id];
   });
   // A link that opens a new window (target=_blank, window.open): a tab right after its page's
   listen<[string, string]>("web-open", ({ payload: [from, url] }) => webTab(from) && openBrowser(url, from));
