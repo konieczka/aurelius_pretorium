@@ -169,10 +169,10 @@ export function openBrowserBeside(url: string, beside: string) {
   app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url }).id;
 }
 
-/** New terminal tab in the focused pane that runs `command` once its shell starts. */
-export function runInTerminal(cwd: string, command: string) {
+/** New terminal tab that runs `command` once its shell starts: in the focused pane, or the rightmost one. */
+export function runInTerminal(cwd: string, command: string, where: "focused" | "rightmost" = "focused") {
   closeViews();
-  const p = focusedPane();
+  const p = where === "rightmost" ? L.rightmost(app.root) : focusedPane();
   const t: L.Tab = { id: L.uid(), kind: "term", cwd };
   queueInput(t.id, command + "\r");
   p.tabs.push(t);

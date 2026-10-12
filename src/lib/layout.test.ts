@@ -1,7 +1,18 @@
 import { expect, test } from "bun:test";
-import { closeTab, dockTab, equalize, minimize, movePath, moveTab, pane, panes, restore, rootWith, split, type Tab } from "./layout";
+import { closeTab, dockTab, equalize, minimize, movePath, moveTab, pane, panes, restore, rightmost, rootWith, split, type Tab } from "./layout";
 
 const t = (id: string): Tab => ({ id, kind: "term", cwd: "/" });
+
+test("the rightmost pane: the last column's top one", () => {
+  const a = pane([t("a")]);
+  const root = rootWith(a);
+  expect(rightmost(root)).toBe(a);
+  const b = split(root, a.id, "row", t("b")); // [a | b]
+  split(root, b.id, "col", t("c")); // [a | b/c]
+  expect(rightmost(root).id).toBe(b.id);
+  split(root, a.id, "col", t("d")); // [a/d | b/c]
+  expect(rightmost(root).id).toBe(b.id);
+});
 
 test("split, move, close collapse back to one pane", () => {
   const a = pane([t("a")]);

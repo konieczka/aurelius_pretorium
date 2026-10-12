@@ -21,6 +21,11 @@ export function panes(n: LNode): Pane[] {
   return n.type === "pane" ? [n] : n.children.flatMap(panes);
 }
 
+/** The pane at the right edge: the last of a row, the top one of a column. */
+export function rightmost(n: LNode): Pane {
+  return n.type === "pane" ? n : rightmost(n.dir === "row" ? n.children[n.children.length - 1] : n.children[0]);
+}
+
 function parentOf(root: Split, id: string): Split | null {
   for (const c of root.children) {
     if (c.id === id) return root;

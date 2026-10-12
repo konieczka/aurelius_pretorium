@@ -61,6 +61,10 @@ test("titles lose the status glyph", () => {
   expect(cleanTitle("⠐ Fix it — app", "/x/app")).toBe("Fix it");
   expect(cleanTitle("Rename the webapp", "/x/app")).toBe("Rename the webapp");
   expect(cleanTitle("Fix it | app", "/x/other")).toBe("Fix it | app");
+  expect(cleanTitle("grok", "/x/app", "grok")).toBe("");
+  expect(cleanTitle("⠧ - Responding - grok", "/x/app", "grok")).toBe("Responding");
+  expect(cleanTitle("Fix it - grok | app", "/x/app", "grok")).toBe("Fix it");
+  expect(cleanTitle("Teach grok", "/x/app", "grok")).toBe("Teach grok");
 });
 
 test("spans", () => {

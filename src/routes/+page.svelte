@@ -26,6 +26,7 @@
   import AgentSettings from "$lib/AgentSettings.svelte";
   import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
   import Fleet from "$lib/Fleet.svelte";
+  import NewAgent from "$lib/NewAgent.svelte";
   import GalleyIcon from "$lib/GalleyIcon.svelte";
   import Settings from "$lib/Settings.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
@@ -155,6 +156,8 @@
           <button class="icon-btn" onclick={() => startCreate("dir")} title="New folder"><FolderPlus size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
+        {:else if app.sidebar === "fleet"}
+          <NewAgent />
         {:else if app.sidebar === "git" && git.root}
           <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={pull} disabled={!!git.busy} title="Pull"><ArrowDown size={14} strokeWidth={1.5} /></button>

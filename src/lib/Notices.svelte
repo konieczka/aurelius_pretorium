@@ -47,7 +47,7 @@
     if (!home || t?.kind !== "term") return; // no workspace has its tab: nowhere to jump to
     const s = shells.all[id];
     const agent = s?.agent ?? t.agent ?? "";
-    const n: Notice = { key: ++keys, tab: id, ws: home.id, cue, agent, label: t.name || cleanTitle(s?.title ?? "", s?.cwd || t.cwd), left: LIFE };
+    const n: Notice = { key: ++keys, tab: id, ws: home.id, cue, agent, label: t.name || cleanTitle(s?.title ?? "", s?.cwd || t.cwd, agent), left: LIFE };
     const i = notices.findIndex((x) => x.tab === id);
     if (i >= 0) notices.splice(i, 1);
     notices.push(n);

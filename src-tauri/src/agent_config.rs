@@ -160,12 +160,32 @@ fn command(agent: Provider) -> &'static str {
 
 /// On the login shell's PATH, or in the agent's own bin folder (where its installer puts it).
 fn installed(agent: Provider, home: &Path) -> bool {
+    launch(agent, home).is_some()
+}
+
+/// What to type in a shell to start the agent: its command, or the full path when only its own bin folder has it.
+fn launch(agent: Provider, home: &Path) -> Option<String> {
+    if crate::login_path().split(':').any(|d| Path::new(d).join(command(agent)).exists()) {
+        return Some(command(agent).into());
+    }
     let own = match agent {
-        Grok => Some(home.join(".grok/bin/grok")),
-        OpenCode => Some(home.join(".opencode/bin/opencode")),
-        _ => None,
+        Grok => home.join(".grok/bin/grok"),
+        OpenCode => home.join(".opencode/bin/opencode"),
+        _ => return None,
     };
-    own.is_some_and(|p| p.exists()) || crate::login_path().split(':').any(|d| Path::new(d).join(command(agent)).exists())
+    own.exists().then(|| own.to_string_lossy().into_owned())
+}
+
+#[derive(Debug, Serialize)]
+pub struct Launch {
+    agent: Provider,
+    command: Option<String>, // None: not installed
+}
+
+/// Every agent, in the fixed order, with how to start it if it's installed (the sidebar's New Agent menu).
+#[tauri::command]
+pub async fn agent_launchers() -> Res<Vec<Launch>> {
+    tauri::async_runtime::spawn_blocking(|| AGENTS.iter().map(|&agent| Launch { agent, command: launch(agent, &home()) }).collect()).await.map_err(err)
 }
 
 /// Models from the agent's own cache of its model list (Codex and Grok keep one); none for the others.

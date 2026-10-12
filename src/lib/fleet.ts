@@ -19,15 +19,18 @@ export type Row = {
   since: number | null; // ms in this status, as of the last poll
 };
 
-/** A title without the agent's status glyph in front, or its folder (the rows are grouped by project, and show it
- * otherwise): "⠐ Fix the bug" -> "Fix the bug", "Fix the bug | app" -> "Fix the bug". Codex's is just its folder: "". */
-export function cleanTitle(t: string, cwd = "") {
-  const c = t.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-  const dir = cwd.slice(cwd.lastIndexOf("/") + 1);
-  if (!dir) return c;
-  if (c === dir) return "";
-  const end = c.lastIndexOf(dir);
-  return end > 0 && end + dir.length === c.length && /\s[|·•—–:-]\s*$/.test(c.slice(0, end)) ? c.slice(0, end).replace(/\s*[|·•—–:-]\s*$/, "") : c;
+/** A title without the agent's status glyph in front, its folder (the rows are grouped by project, and show it
+ * otherwise) or its own command (the row names the agent): "⠐ Fix the bug" -> "Fix the bug", "Fix the bug | app" ->
+ * "Fix the bug", "- Responding - grok" -> "Responding". Codex's is just its folder, Grok's idle one just "grok": "". */
+export function cleanTitle(t: string, cwd = "", agent = "") {
+  let c = t.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  for (const name of [cwd.slice(cwd.lastIndexOf("/") + 1), agent]) {
+    if (!name) continue;
+    if (c === name) return "";
+    const end = c.lastIndexOf(name);
+    if (end > 0 && end + name.length === c.length && /\s[|·•—–:-]\s*$/.test(c.slice(0, end))) c = c.slice(0, end).replace(/\s*[|·•—–:-]\s*$/, "");
+  }
+  return c;
 }
 
 export function fleetRows(workspaces: { id: string; tabs: Tab[] }[], shells: Record<string, Shell>): Row[] {
@@ -40,10 +43,10 @@ export function fleetRows(workspaces: { id: string; tabs: Tab[] }[], shells: Rec
       const s = shells[t.id];
       const agent = s ? s.agent : t.agent;
       if (!agent) continue;
-      rows.push({ id: t.id, ws: w.id, tab: t, agent, status: s ? statusOf(s) : "asleep", asking: s?.asking ?? null, label: t.name || cleanTitle(s?.title ?? "", s?.cwd || t.cwd), cwd: s?.cwd || t.cwd, since: s ? s.since : null });
+      rows.push({ id: t.id, ws: w.id, tab: t, agent, status: s ? statusOf(s) : "asleep", asking: s?.asking ?? null, label: t.name || cleanTitle(s?.title ?? "", s?.cwd || t.cwd, agent), cwd: s?.cwd || t.cwd, since: s ? s.since : null });
     }
   for (const [id, s] of Object.entries(shells))
-    if (s.agent && !placed.has(id)) rows.push({ id, ws: null, tab: null, agent: s.agent, status: statusOf(s), asking: s.asking, label: cleanTitle(s.title, s.cwd), cwd: s.cwd, since: s.since });
+    if (s.agent && !placed.has(id)) rows.push({ id, ws: null, tab: null, agent: s.agent, status: statusOf(s), asking: s.asking, label: cleanTitle(s.title, s.cwd, s.agent), cwd: s.cwd, since: s.since });
   // Most urgent first; within a status, the latest change first (asleep ones keep workspace order).
   const rank = (r: Row) => STATUSES.indexOf(r.status);
   return rows.sort((a, b) => rank(a) - rank(b) || (a.since ?? Infinity) - (b.since ?? Infinity));
