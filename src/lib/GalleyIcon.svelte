@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Fleet button's mark: a Roman galley (ram at the bow, curled stern post, square sail, oars), drawn like a
+  // The Fleet sidebar tab's mark: a Roman galley (ram at the bow, curled stern post, square sail, oars), drawn like a
   // Lucide icon: 24-unit grid, stroked in currentColor.
   let { size = 16, strokeWidth = 1.5 }: { size?: number; strokeWidth?: number } = $props();
 </script>

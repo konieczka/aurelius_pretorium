@@ -4,10 +4,9 @@ import type { Scan, Scope } from "./skills";
 import type { Provider } from "./usageStats";
 import { closeUsage } from "./usageView.svelte";
 import { closeAgents } from "./agentsView.svelte";
-import { closeFleet } from "./fleetView.svelte";
 import { closeSettings } from "./settingsView.svelte";
 
-// The Skills view stands in for this window's panes while open, like Usage, Agents and Fleet (they take turns). Per window, not saved.
+// The Skills view stands in for this window's panes while open, like Usage and Agents (they take turns). Per window, not saved.
 export const skills = $state({
   open: false,
   scan: null as Scan | null,
@@ -26,7 +25,7 @@ export const skills = $state({
 
 export function toggleSkills() {
   skills.open = !skills.open;
-  if (skills.open) (closeUsage(), closeAgents(), closeFleet(), closeSettings());
+  if (skills.open) (closeUsage(), closeAgents(), closeSettings());
 }
 export const closeSkills = () => (skills.open = false);
 

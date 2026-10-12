@@ -7,11 +7,10 @@ import { disposeBrowser, focusAddress } from "./Browser.svelte";
 import { hasPreview, isDrawing } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
-import { closeFleet } from "./fleetView.svelte";
 import { shells } from "./agents.svelte";
 
-/** Opening a tab brings the panes back from the Usage, Skills or Fleet view. */
-const closeViews = () => (closeUsage(), closeSkills(), closeFleet());
+/** Opening a tab brings the panes back from the Usage or Skills view. */
+const closeViews = () => (closeUsage(), closeSkills());
 
 // localStorage is shared by all windows of the app.
 export const store = {
@@ -44,7 +43,7 @@ export const app = $state({
   selectedPath: "", // tree row ⌘⌫ deletes
   renaming: "", // tree path with the inline rename input
   cut: "", // tree path Cut to the clipboard: pasting it in the tree moves it (elsewhere, e.g. Finder, it's a copy)
-  sidebar: "files" as "files" | "git",
+  sidebar: "files" as "files" | "git" | "fleet",
   sidebarOpen: load<boolean>("sidebarOpen", true), // ⌘B / the header button hide the whole sidebar
   conflicts: {} as Record<string, number>, // tab id -> conflict blocks in the editor
   gitVersion: 0, // bumped on save / git ops: diff views refetch
@@ -100,6 +99,13 @@ export function activeTab(): L.Tab | undefined {
 export function toggleSidebar() {
   app.sidebarOpen = !app.sidebarOpen;
   store.set("sidebarOpen", String(app.sidebarOpen));
+}
+
+/** ⇧⌘J: show the sidebar's Fleet mode, or hide the sidebar when it's already showing it. */
+export function toggleFleet() {
+  if (app.sidebarOpen && app.sidebar === "fleet") return toggleSidebar();
+  app.sidebar = "fleet";
+  if (!app.sidebarOpen) toggleSidebar();
 }
 
 /** Share the workspace's space evenly between its panes. */

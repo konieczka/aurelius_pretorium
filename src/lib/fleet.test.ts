@@ -4,7 +4,7 @@ import type { Shell } from "./agents.svelte";
 import type { Tab } from "./layout";
 
 const term = (id: string, more: Partial<Tab & { kind: "term" }> = {}): Tab => ({ id, kind: "term", cwd: "/p", ...more });
-const shell = (more: Partial<Shell>): Shell => ({ agent: "claude", quiet: null, title: "", cwd: "/p", busy: false, attention: false, since: 0, ...more });
+const shell = (more: Partial<Shell>): Shell => ({ agent: "claude", quiet: null, title: "", cwd: "/p", busy: false, attention: false, asking: null, since: 0, ...more });
 
 test("one row per agent, most urgent first", () => {
   const rows = fleetRows(
@@ -30,6 +30,14 @@ test("one row per agent, most urgent first", () => {
   expect(rows.find((r) => r.id === "asleep")?.agent).toBe("codex");
 });
 
+test("a prompt that's up needs you, even under a spinner", () => {
+  const rows = fleetRows([{ id: "w", tabs: [term("a"), term("b")] }], { a: shell({ busy: true, since: 5 }), b: shell({ busy: true, asking: "approval", since: 9 }) });
+  expect(rows.map((r) => [r.id, r.status, r.asking])).toEqual([
+    ["b", "attention", "approval"],
+    ["a", "busy", null],
+  ]);
+});
+
 test("a shell whose agent quit drops the saved one", () => {
   expect(fleetRows([{ id: "w", tabs: [term("t", { agent: "claude" })] }], { t: shell({ agent: null }) })).toEqual([]);
 });
@@ -49,6 +57,10 @@ test("titles lose the status glyph", () => {
   expect(cleanTitle("- Responding - grok")).toBe("Responding - grok");
   expect(cleanTitle("◐ ")).toBe("");
   expect(cleanTitle("⠦ fleet_command", "/dev/fleet_command")).toBe("");
+  expect(cleanTitle("Inspect first two commits | fleet_command", "/dev/fleet_command")).toBe("Inspect first two commits");
+  expect(cleanTitle("⠐ Fix it — app", "/x/app")).toBe("Fix it");
+  expect(cleanTitle("Rename the webapp", "/x/app")).toBe("Rename the webapp");
+  expect(cleanTitle("Fix it | app", "/x/other")).toBe("Fix it | app");
 });
 
 test("spans", () => {

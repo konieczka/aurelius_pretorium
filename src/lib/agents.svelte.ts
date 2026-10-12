@@ -19,6 +19,7 @@ export type Shell = {
   cwd: string; // the shell's working directory now
   busy: boolean;
   attention: boolean; // it rang, or finished, while no window had it on screen
+  asking: "question" | "approval" | null; // a prompt is up that hasn't been typed into
   since: number; // ms since the agent came or went, or started or stopped working (as of `polled`)
 };
 export const shells = $state({ all: {} as Record<string, Shell>, polled: 0 });

@@ -6,7 +6,10 @@ import { ask, message } from "@tauri-apps/plugin-dialog";
 import * as L from "./layout";
 import { activate as activateTab, allTabs, app, dispose, load, openWorkspace, restoreTab, store, tabOwner } from "./state.svelte";
 import { focusTerm } from "./Terminal.svelte";
-import { closeFleet } from "./fleetView.svelte";
+import { closeUsage } from "./usageView.svelte";
+import { closeSkills } from "./skillsView.svelte";
+import { closeAgents } from "./agentsView.svelte";
+import { closeSettings } from "./settingsView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
 import { shells } from "./agents.svelte";
 import { cssHex } from "./theme.svelte";
@@ -118,7 +121,8 @@ export async function showTab(id: string, tabId: string) {
 }
 
 function reveal(tabId: string) {
-  closeFleet();
+  closeUsage(), closeSkills(), closeAgents(), closeSettings(); // the panes come back from a full-page view
+
   if (app.minimized.some((m) => m.tab.id === tabId)) restoreTab(tabId);
   else activateTab(tabId);
   setTimeout(() => focusTerm(tabId)); // a terminal that was already its pane's active one doesn't remount (and focus)
@@ -423,7 +427,7 @@ function init() {
       store.set("ws:" + id, JSON.stringify(l));
     }
   });
-  // The Fleet view in another window jumps to one of our tabs.
+  // The sidebar's Fleet in another window jumps to one of our tabs.
   getCurrentWebviewWindow().listen<{ id: string; tab: string }>("show-tab", ({ payload }) => {
     if (!ws.open.includes(payload.id)) return;
     activate(payload.id);

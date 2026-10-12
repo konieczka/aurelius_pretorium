@@ -10,6 +10,7 @@ pub struct Signals {
     pub title: String,
     pub rang: bool,  // since last taken
     pub asked: bool, // since last taken
+    pub asking: Option<Ask>, // a prompt is up that hasn't been typed into (lib.rs clears it on typing)
     state: Esc,
     osc: Vec<u8>,
     text: String,    // the last few letters and digits of the text shown, lowercased (see ASKS)
@@ -45,7 +46,17 @@ const ASKS: [&str; 10] = [
     "allowcalling",
     "allowcreation",
 ];
+// Of those, the ones only an approval prompt shows (the rest may be a question: Claude's picker, a reply ending in one).
+const APPROVALS: [&str; 7] = ["yesanddont", "yesandalways", "noandtell", "runthiscommand", "allowaccessto", "allowcalling", "allowcreation"];
 const TEXT_MAX: usize = 32;
+
+/// What a prompt that's up asks for. An approval's choices are drawn after its question: they turn a question into one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Ask {
+    Question,
+    Approval,
+}
 
 impl Signals {
     /// `echo`: output answering the user's typing or a resize (redraws), which asks nothing new.
@@ -92,7 +103,13 @@ impl Signals {
             self.text.remove(0);
         }
         self.text.push(c);
-        if !echo && !self.answered && ASKS.iter().any(|a| self.text.ends_with(a)) {
+        if echo {
+            return;
+        }
+        let Some(a) = ASKS.iter().find(|a| self.text.ends_with(*a)) else { return };
+        let kind = if APPROVALS.contains(a) { Ask::Approval } else { Ask::Question };
+        self.asking = self.asking.max(Some(kind));
+        if !self.answered {
             self.asked = true;
             self.answered = true;
         }
@@ -326,6 +343,10 @@ mod tests {
         assert!(!s.asked);
         s.feed(b"nt to proceed?\x1b[0m\r\n \xe2\x9d\xaf 1. Yes", false);
         assert!(std::mem::take(&mut s.asked));
+        assert_eq!(s.asking, Some(Ask::Question), "until its choices are drawn");
+        s.feed(b" 2. Yes, and don't ask again\r\n 3. No, and tell Claude what to do differently", false);
+        assert!(!s.asked, "the same prompt");
+        assert_eq!(s.asking, Some(Ask::Approval));
         // Redrawn without the user answering: the same prompt.
         s.feed(b"Do you want to proceed?", false);
         assert!(!s.asked);

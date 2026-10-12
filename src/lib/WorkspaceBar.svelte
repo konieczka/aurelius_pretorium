@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
-  import GalleyIcon from "./GalleyIcon.svelte";
+  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
+  import { setMode, theme, type Mode } from "./theme.svelte";
   import { settings, toggleSettings } from "./settingsView.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { cues, toggleSoundCues } from "./soundCues.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
   import { agents, toggleAgents } from "./agentsView.svelte";
-  import { fleet, toggleFleet } from "./fleetView.svelte";
   import { activity, shells } from "./agents.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
@@ -31,8 +30,12 @@
       }),
     );
   });
-  const waiting = $derived(Object.values(activity).filter((a) => a === "attention").length);
-  const running = $derived(Object.values(shells.all).filter((s) => s.agent).length);
+
+  // Light, dark, or following macOS: one click to the next (Settings has all three side by side).
+  const modes: Record<Mode, { label: string; icon: typeof Sun }> = { light: { label: "Light", icon: Sun }, dark: { label: "Dark", icon: Moon }, system: { label: "System", icon: Monitor } };
+  const nextMode: Record<Mode, Mode> = { light: "dark", dark: "system", system: "light" };
+  const cycleTheme = () => setMode(nextMode[theme.mode]);
+  const ThemeIcon = $derived(modes[theme.mode].icon);
 
   async function menu(id: string) {
     const v = await pick(nameOf(id), [
@@ -183,17 +186,8 @@
   <button class="icon-btn" onclick={arrangePanes} title="Auto-arrange panes" aria-label="Auto-arrange panes">
     <LayoutGrid size={14} strokeWidth={1.5} />
   </button>
-  <button
-    class="icon-btn view fleet"
-    class:on={fleet.open}
-    onclick={toggleFleet}
-    title="Fleet: {running} agent{running === 1 ? '' : 's'} running{waiting ? `, ${waiting} need${waiting === 1 ? 's' : ''} you` : ''} (⇧⌘J)"
-    aria-label="Fleet: {running} agent{running === 1 ? '' : 's'} running"
-    aria-pressed={fleet.open}
-  >
-    <GalleyIcon size={15} />
-    {#if running}<span class="count">{running}</span>{/if}
-    {#if waiting}<span class="waiting"></span>{/if}
+  <button class="icon-btn" onclick={cycleTheme} title="Theme: {modes[theme.mode].label} (next: {modes[nextMode[theme.mode]].label})" aria-label="Theme: {modes[theme.mode].label}">
+    <ThemeIcon size={14} strokeWidth={1.5} />
   </button>
   <span class="sep"></span>
   <button
@@ -467,30 +461,6 @@
     .working {
       animation: none;
     }
-  }
-  /* Agents running, next to the galley; an ember dot in the corner while any wait on you */
-  .fleet {
-    position: relative;
-    display: inline-flex;
-    gap: 5px;
-    width: auto !important;
-    min-width: 28px;
-    padding: 0 8px;
-    color: var(--foreground);
-  }
-  .count {
-    font-size: 11.5px;
-    font-variant-numeric: tabular-nums;
-  }
-  .waiting {
-    position: absolute;
-    top: 3px;
-    right: 2px;
-    width: 6px;
-    height: 6px;
-    border-radius: 9999px;
-    background: oklch(0.7 0.17 50);
-    box-shadow: none;
   }
   .x {
     width: 20px !important;

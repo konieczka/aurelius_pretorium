@@ -13,7 +13,7 @@
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
   import { initUpdates } from "$lib/updates";
-  import { watchAgents } from "$lib/agents.svelte";
+  import { shells, watchAgents } from "$lib/agents.svelte";
   import GitPanel, { changeCount, git, pull, push, refreshGit, watchGit } from "$lib/GitPanel.svelte";
   import { saveEditor } from "$lib/Editor.svelte";
   import { browserGo, focusAddress } from "$lib/Browser.svelte";
@@ -26,11 +26,11 @@
   import AgentSettings from "$lib/AgentSettings.svelte";
   import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
   import Fleet from "$lib/Fleet.svelte";
-  import { closeFleet, fleet, toggleFleet } from "$lib/fleetView.svelte";
+  import GalleyIcon from "$lib/GalleyIcon.svelte";
   import Settings from "$lib/Settings.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleSidebar,
+    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -48,6 +48,9 @@
   $effect(() => {
     if (app.workspace) return watchGit();
   });
+
+  // Agents that need you: asking something, or done (or rang) out of sight. Every shell, wherever its tab is.
+  const waiting = $derived(Object.values(shells.all).filter((s) => s.agent && (s.asking || s.attention)).length);
 
   async function pickFolder() {
     const dir = await open({ directory: true });
@@ -103,7 +106,6 @@
       k === "a" && e.shiftKey ? toggleAgents :
       k === "w" && agents.open ? closeAgents :
       k === "j" && e.shiftKey ? toggleFleet :
-      k === "w" && fleet.open ? closeFleet :
       k === "s" && agents.open ? saveAgentFile :
       k === "t" && e.shiftKey ? () => openBrowser() :
       k === "t" ? newTerminal :
@@ -137,6 +139,10 @@
       </header>
       <div class="toolbar">
         <div class="modes" role="tablist">
+          <button class="icon-btn mode" class:on={app.sidebar === "fleet"} role="tab" aria-selected={app.sidebar === "fleet"} onclick={() => (app.sidebar = "fleet")} title="Fleet: every agent, in every workspace (⇧⌘J)">
+            <GalleyIcon size={15} />
+            {#if waiting}<span class="badge hot" title="{waiting} need{waiting === 1 ? 's' : ''} you">{waiting}</span>{/if}
+          </button>
           <button class="icon-btn mode" class:on={app.sidebar === "files"} role="tab" aria-selected={app.sidebar === "files"} onclick={() => (app.sidebar = "files")} title="Files (⇧⌘E)"><Files size={15} strokeWidth={1.5} /></button>
           <button class="icon-btn mode" class:on={app.sidebar === "git"} role="tab" aria-selected={app.sidebar === "git"} onclick={() => (app.sidebar = "git")} title="Source Control (⇧⌘G)">
             <GitBranch size={15} strokeWidth={1.5} />
@@ -149,7 +155,7 @@
           <button class="icon-btn" onclick={() => startCreate("dir")} title="New folder"><FolderPlus size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
-        {:else if git.root}
+        {:else if app.sidebar === "git" && git.root}
           <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={pull} disabled={!!git.busy} title="Pull"><ArrowDown size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={push} disabled={!!git.busy} title="Push"><ArrowUp size={14} strokeWidth={1.5} /></button>
@@ -177,13 +183,15 @@
         >
           {#key app.workspace}<FileTree path={app.workspace} />{/key}
         </div>
-      {:else}
+      {:else if app.sidebar === "git"}
         <div class="tree"><GitPanel /></div>
+      {:else}
+        <div class="tree"><Fleet /></div>
       {/if}
     </aside>
-    <!-- The Usage, Skills, Agents, Fleet and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
-    <main class:away={usage.open || skills.open || agents.open || fleet.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
-    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{:else if fleet.open}<Fleet />{:else if settings.open}<Settings />{/if}
+    <!-- The Usage, Skills, Agents and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open || skills.open || agents.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{:else if settings.open}<Settings />{/if}
     <StatusBar />
   </div>
   <QuickPick />
@@ -201,8 +209,9 @@
 <style>
   /* Planes: the bar and status line sit on the field; the sidebar island and the work slabs float on it, a gutter apart */
   .app {
+    --sidebar-width: 264px;
     display: grid;
-    grid-template-columns: 248px 1fr;
+    grid-template-columns: var(--sidebar-width) 1fr;
     grid-template-rows: auto minmax(0, 1fr) auto;
     column-gap: var(--gap);
     box-sizing: border-box;
@@ -210,7 +219,7 @@
     padding: 0 var(--gap);
     transition: grid-template-columns var(--dur-base) var(--ease-standard), column-gap var(--dur-base) var(--ease-standard);
   }
-  /* The column animates to 0; the sidebar keeps its 248px inside so its contents don't reflow while sliding */
+  /* The column animates to 0; the sidebar keeps its width inside so its contents don't reflow while sliding */
   .app.collapsed {
     grid-template-columns: 0 1fr;
     column-gap: 0;
@@ -226,7 +235,7 @@
   }
   aside > * {
     box-sizing: border-box;
-    width: 248px;
+    width: var(--sidebar-width);
     flex-shrink: 0;
   }
   .app.collapsed aside {
@@ -297,6 +306,11 @@
     line-height: 14px;
     text-align: center;
     box-sizing: border-box;
+  }
+  /* Agents waiting on you: the same ember as their dots */
+  .badge.hot {
+    background: oklch(0.7 0.17 50);
+    color: white;
   }
   .ws {
     display: flex;

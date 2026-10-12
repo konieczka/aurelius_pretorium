@@ -218,6 +218,10 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let mut o = s.out.lock().unwrap();
     o.input = Some(Instant::now());
     o.signals.typed();
+    // Answered (or dismissed). Focus reports the terminal sends by itself don't count.
+    if !matches!(data.as_str(), "\x1b[I" | "\x1b[O") {
+        o.signals.asking = None;
+    }
     drop(o);
     s.input.send(data.into_bytes()).map_err(|_| "the shell has exited".into())
 }
@@ -298,6 +302,7 @@ struct Shell {
     cwd: String, // the agent's working directory now, or else the shell's
     busy: bool,
     attention: bool, // the agent rang, or finished, while no window had it on screen
+    asking: Option<status::Ask>, // a prompt is up, waiting on the user
     since: u64,      // ms since the agent came or went, or started or stopped working
 }
 
@@ -358,6 +363,9 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
         let rang = std::mem::take(&mut o.signals.rang);
         let asked = std::mem::take(&mut o.signals.asked);
         let agent = agent.map(|(a, _)| *a);
+        if agent.is_none() {
+            o.signals.asking = None; // whoever asked is gone
+        }
         let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang, asked);
         if let Some(cue) = s.watch.cue.take() {
             cues.push(Cued { id: id.clone(), cue });
@@ -369,6 +377,7 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
             cwd: s.cwd.clone(),
             busy,
             attention: s.watch.attention,
+            asking: o.signals.asking,
             since: now.saturating_duration_since(s.watch.changed).as_millis() as u64,
         });
     }
