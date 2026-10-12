@@ -181,10 +181,11 @@ fn pty_open(
             }
             let mut o = sink.lock().unwrap();
             let now = Instant::now();
-            if o.input.is_none_or(|t| now - t > ECHO) {
+            let echo = o.input.is_some_and(|t| now - t <= ECHO);
+            if !echo {
                 o.active = Some(now);
             }
-            o.signals.feed(&buf[..n]);
+            o.signals.feed(&buf[..n], echo);
             o.recent.extend_from_slice(&buf[..n]);
             if o.recent.len() > KEEP {
                 // Cut at a line start so the replay doesn't begin mid escape sequence.
@@ -214,7 +215,10 @@ fn pty_open(
 fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let map = ptys.sessions.lock().unwrap();
     let s = map.get(&id).ok_or("no such pty")?;
-    s.out.lock().unwrap().input = Some(Instant::now());
+    let mut o = s.out.lock().unwrap();
+    o.input = Some(Instant::now());
+    o.signals.typed();
+    drop(o);
     s.input.send(data.into_bytes()).map_err(|_| "the shell has exited".into())
 }
 
@@ -328,6 +332,7 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
     }
     let now = Instant::now();
     let mut shells = HashMap::new();
+    let mut cue = None; // the most pressing of this poll's: several agents finishing together make one sound
     for (id, s) in ptys.sessions.lock().unwrap().iter_mut() {
         if seen.contains(id) {
             s.watch.seen(now);
@@ -344,8 +349,10 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
         let mut o = s.out.lock().unwrap();
         let quiet = o.active.map(|t| now.saturating_duration_since(t).as_millis() as u64);
         let rang = std::mem::take(&mut o.signals.rang);
+        let asked = std::mem::take(&mut o.signals.asked);
         let agent = agent.map(|(a, _)| *a);
-        let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang);
+        let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang, asked);
+        cue = cue.max(s.watch.cue.take());
         shells.insert(id.clone(), Shell {
             agent: agent.map(String::from),
             quiet,
@@ -356,7 +363,54 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
             since: now.saturating_duration_since(s.watch.changed).as_millis() as u64,
         });
     }
+    if let Some(c) = cue {
+        play(c);
+    }
     Ok(shells)
+}
+
+/// Sound Cues: a sound when an agent asks something (approval, a question) and another when it finishes its turn,
+/// unless a window has its tab on screen.
+/// Played here, not in a window: each window polls, and a shell may be in none of them.
+static CUES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn play(cue: status::Cue) {
+    if !CUES.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Told apart by rhythm as well as tone: a question pings twice, a finished turn chimes once.
+        let (sound, times) = match cue {
+            status::Cue::Ask => ("Ping", 2),
+            status::Cue::Done => ("Glass", 1),
+        };
+        std::thread::spawn(move || {
+            let mut played = Vec::new();
+            for i in 0..times {
+                if i > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(160));
+                }
+                played.extend(std::process::Command::new("/usr/bin/afplay").arg(format!("/System/Library/Sounds/{sound}.aiff")).spawn());
+            }
+            for mut c in played {
+                let _ = c.wait();
+            }
+        });
+    }
+}
+
+/// Turn Sound Cues on/off (`None` just reads it); `preview` plays the "done" sound. Every window hears the change.
+#[tauri::command]
+fn sound_cues(on: Option<bool>, preview: Option<bool>, app: AppHandle) -> bool {
+    if let Some(on) = on {
+        CUES.store(on, std::sync::atomic::Ordering::Relaxed);
+        let _ = app.emit("sound-cues", on);
+    }
+    if preview == Some(true) {
+        play(status::Cue::Done);
+    }
+    CUES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A process's current working directory: the user may have `cd`'d out of the folder the tab was opened in.
@@ -1068,7 +1122,7 @@ pub fn run() {
         .manage(web::Views::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set,
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_config_save, agent_config::agent_config_set,
             web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused
         ])
         .run(tauri::generate_context!())

@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Brain, Flame, Gauge, LayoutGrid, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
+  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
   import GalleyIcon from "./GalleyIcon.svelte";
   import { settings, toggleSettings } from "./settingsView.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
+  import { cues, toggleSoundCues } from "./soundCues.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
   import { agents, toggleAgents } from "./agentsView.svelte";
@@ -237,6 +238,16 @@
     <Flame size={14} strokeWidth={1.5} />
   </button>
   <button
+    class="icon-btn cues"
+    class:on={cues.on}
+    onclick={toggleSoundCues}
+    title="Sound Cues: {cues.on ? 'on' : 'off'} (a sound when an agent off screen asks something or finishes)"
+    aria-label="Sound Cues"
+    aria-pressed={cues.on}
+  >
+    {#if cues.on}<Bell size={14} strokeWidth={1.5} />{:else}<BellOff size={14} strokeWidth={1.5} />{/if}
+  </button>
+  <button
     class="icon-btn view"
     class:on={settings.open}
     onclick={toggleSettings}
@@ -367,6 +378,10 @@
       animation: none;
       filter: drop-shadow(0 0 3px var(--ember-glow));
     }
+  }
+  /* Lit while sounds play: a gold bell (off shows the struck-through one, dimmed like any idle tool) */
+  .cues.on {
+    color: var(--gold);
   }
   .ws {
     position: relative;

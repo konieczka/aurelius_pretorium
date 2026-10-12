@@ -3,14 +3,17 @@
 
 use std::time::{Duration, Instant};
 
-/// Terminal title and bell / notification escapes, read off a shell's raw output. Keeps its place across reads: a
-/// sequence can be split between two of them.
+/// Terminal title, bell / notification escapes and prompts asking the user something, read off a shell's raw output.
+/// Keeps its place across reads: a sequence can be split between two of them.
 #[derive(Default)]
 pub struct Signals {
     pub title: String,
-    pub rang: bool, // since last taken
+    pub rang: bool,  // since last taken
+    pub asked: bool, // since last taken
     state: Esc,
     osc: Vec<u8>,
+    text: String,    // the last few letters and digits of the text shown, lowercased (see ASKS)
+    answered: bool,  // no typing since the last prompt: redraws of it don't ask again
 }
 
 #[derive(Default, Clone, Copy)]
@@ -20,19 +23,49 @@ enum Esc {
     Esc,
     Osc,
     OscEsc, // ESC inside an OSC: the start of its ST terminator (ESC \)
+    Csi,    // ESC [ ... up to its final byte: colours, cursor moves
 }
 
 const OSC_MAX: usize = 4096; // longer ones (OSC 52 clipboard pastes) are cut; titles and notifications are short
 
+// An agent asking the user something: approval prompts (Claude Code's "Do you want to proceed?" / "make this edit",
+// Codex's "Would you like to run the following command?", Antigravity's "Run this command?" / "Allow access to this
+// file?"), the choices under them ("Yes, and don't ask again", "Yes, and always allow ...", "No, and tell ... what to
+// do differently" in all three), Claude's question picker, or a question at the end of a reply. Matched on letters
+// and digits only: TUIs that redraw by diff (Codex) move the cursor over unchanged blanks instead of writing spaces.
+const ASKS: [&str; 10] = [
+    "doyouwant",
+    "wouldyoulike",
+    "entertoselect",
+    "yesanddont",
+    "yesandalways",
+    "noandtell",
+    "runthiscommand",
+    "allowaccessto",
+    "allowcalling",
+    "allowcreation",
+];
+const TEXT_MAX: usize = 32;
+
 impl Signals {
-    pub fn feed(&mut self, bytes: &[u8]) {
+    /// `echo`: output answering the user's typing or a resize (redraws), which asks nothing new.
+    pub fn feed(&mut self, bytes: &[u8], echo: bool) {
         for &b in bytes {
             self.state = match (self.state, b) {
                 (Esc::Ground, 0x07) => {
                     self.rang = true;
                     Esc::Ground
                 }
-                (Esc::Ground | Esc::Esc, 0x1b) => Esc::Esc,
+                (Esc::Ground | Esc::Esc | Esc::Csi, 0x1b) => Esc::Esc,
+                (Esc::Ground, _) => {
+                    if b.is_ascii_alphanumeric() {
+                        self.letter(b.to_ascii_lowercase() as char, echo);
+                    }
+                    Esc::Ground
+                }
+                (Esc::Esc, b'[') => Esc::Csi,
+                (Esc::Csi, 0x40..=0x7e) => Esc::Ground,
+                (Esc::Csi, _) => Esc::Csi,
                 (Esc::Esc | Esc::OscEsc, b']') => {
                     self.osc.clear();
                     Esc::Osc
@@ -52,6 +85,22 @@ impl Signals {
                 _ => Esc::Ground,
             }
         }
+    }
+
+    fn letter(&mut self, c: char, echo: bool) {
+        if self.text.len() >= TEXT_MAX {
+            self.text.remove(0);
+        }
+        self.text.push(c);
+        if !echo && !self.answered && ASKS.iter().any(|a| self.text.ends_with(a)) {
+            self.asked = true;
+            self.answered = true;
+        }
+    }
+
+    /// The user typed into the shell: the next prompt asks again.
+    pub fn typed(&mut self) {
+        self.answered = false;
     }
 
     /// OSC 0/2 set the title. Bell-likes are the notification escapes agents can be set to use: OSC 9 (iTerm2; with a
@@ -91,6 +140,17 @@ pub fn busy(agent: &str, title: &str, quiet: Option<u64>) -> bool {
     }
 }
 
+/// A sound worth playing: the agent asks something, or finished its turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Cue {
+    Done,
+    Ask,
+}
+
+// A finished turn waits this long to be cued: the prompt it stopped for may be drawn just after the title goes idle.
+const DONE_DEFER: Duration = Duration::from_millis(1000);
+const ASK_COVERS: Duration = Duration::from_millis(5000); // a turn ending this soon after asking needs no "done"
+
 /// One shell's agent state between polls.
 pub struct Watch {
     agent: Option<String>,
@@ -98,11 +158,14 @@ pub struct Watch {
     pub attention: bool, // it rang, or finished, while no window had it on screen
     seen: Option<Instant>,
     pub changed: Instant, // agent came or went, started or stopped working
+    asked: Option<Instant>,
+    done: Option<Instant>, // finished, not cued yet (DONE_DEFER)
+    pub cue: Option<Cue>,  // from the last step, until taken; only while no window has the tab on screen
 }
 
 impl Default for Watch {
     fn default() -> Self {
-        Watch { agent: None, busy_since: None, attention: false, seen: None, changed: Instant::now() }
+        Watch { agent: None, busy_since: None, attention: false, seen: None, changed: Instant::now(), asked: None, done: None, cue: None }
     }
 }
 
@@ -113,7 +176,7 @@ impl Watch {
     }
 
     /// Advance with what the shell shows now; returns whether the agent is working.
-    pub fn step(&mut self, now: Instant, agent: Option<&str>, title: &str, quiet: Option<u64>, rang: bool) -> bool {
+    pub fn step(&mut self, now: Instant, agent: Option<&str>, title: &str, quiet: Option<u64>, rang: bool, asked: bool) -> bool {
         if self.agent.as_deref() != agent {
             self.agent = agent.map(String::from);
             self.changed = now;
@@ -121,8 +184,14 @@ impl Watch {
         let Some(agent) = agent else {
             self.busy_since = None;
             self.attention = false;
+            self.done = None;
             return false;
         };
+        if asked {
+            self.asked = Some(now);
+            self.done = None;
+            self.cue = Some(Cue::Ask);
+        }
         let in_view = self.seen.is_some_and(|t| now.duration_since(t) < IN_VIEW);
         let working = busy(agent, title, quiet);
         if working {
@@ -131,14 +200,24 @@ impl Watch {
                 self.changed = now;
             }
             self.attention = false;
+            self.done = None;
         } else if let Some(since) = self.busy_since.take() {
             self.changed = now;
-            self.attention = !in_view && (TITLED.contains(&agent) || now.duration_since(since) >= SETTLED);
+            let finished = TITLED.contains(&agent) || now.duration_since(since) >= SETTLED;
+            self.attention = !in_view && finished;
+            if finished && !self.asked.is_some_and(|t| now.duration_since(t) < ASK_COVERS) {
+                self.done = Some(now);
+            }
         } else if rang && !in_view {
             self.attention = true;
         }
+        if self.done.is_some_and(|t| now.duration_since(t) >= DONE_DEFER) {
+            self.done = None;
+            self.cue = Some(Cue::Done);
+        }
         if in_view {
             self.attention = false;
+            self.cue = None; // you can see it ask or finish
         }
         working
     }
@@ -173,17 +252,17 @@ mod tests {
     #[test]
     fn reads_titles_and_bells_across_reads() {
         let mut s = Signals::default();
-        s.feed(b"hello \x1b]0;\xe2\x9c\xb3 Fix t");
+        s.feed(b"hello \x1b]0;\xe2\x9c\xb3 Fix t", false);
         assert_eq!(s.title, "");
-        s.feed(b"he bug\x07more");
+        s.feed(b"he bug\x07more", false);
         assert_eq!(s.title, "✳ Fix the bug");
         assert!(!s.rang, "a BEL ending an OSC isn't a bell");
-        s.feed(b"\x1b]2;st-terminated\x1b");
-        s.feed(b"\\");
+        s.feed(b"\x1b]2;st-terminated\x1b", false);
+        s.feed(b"\\", false);
         assert_eq!(s.title, "st-terminated");
-        s.feed(b"\x1b[31mred\x1b[0m");
+        s.feed(b"\x1b[31mred\x1b[0m", false);
         assert!(!s.rang);
-        s.feed(b"\x07");
+        s.feed(b"\x07", false);
         assert!(s.rang);
     }
 
@@ -191,7 +270,7 @@ mod tests {
     fn notification_escapes_ring() {
         let rings = |seq: &[u8]| {
             let mut s = Signals::default();
-            s.feed(seq);
+            s.feed(seq, false);
             s.rang
         };
         assert!(rings(b"\x1b]9;Done\x07"));
@@ -208,21 +287,21 @@ mod tests {
         let t0 = Instant::now();
         let at = |ms| t0 + Duration::from_millis(ms);
         let mut w = Watch::default();
-        assert!(w.step(at(0), Some("claude"), "◐ Work", None, false));
-        assert!(!w.step(at(1000), Some("claude"), "✳ Work", None, false));
+        assert!(w.step(at(0), Some("claude"), "◐ Work", None, false, false));
+        assert!(!w.step(at(1000), Some("claude"), "✳ Work", None, false, false));
         assert!(w.attention);
         w.seen(at(1500));
-        w.step(at(2000), Some("claude"), "✳ Work", None, false);
+        w.step(at(2000), Some("claude"), "✳ Work", None, false, false);
         assert!(!w.attention, "looked at");
         // Finishing on screen doesn't ask for attention; ringing while idle off screen does.
-        w.step(at(2100), Some("claude"), "◐ More", None, false);
+        w.step(at(2100), Some("claude"), "◐ More", None, false, false);
         w.seen(at(2200));
-        w.step(at(2300), Some("claude"), "✳ More", None, false);
+        w.step(at(2300), Some("claude"), "✳ More", None, false, false);
         assert!(!w.attention);
-        w.step(at(9000), Some("claude"), "✳ More", None, true);
+        w.step(at(9000), Some("claude"), "✳ More", None, true, false);
         assert!(w.attention);
         // The agent quits: nothing to attend to.
-        w.step(at(9500), None, "", None, false);
+        w.step(at(9500), None, "", None, false, false);
         assert!(!w.attention);
     }
 
@@ -231,11 +310,89 @@ mod tests {
         let t0 = Instant::now();
         let at = |ms| t0 + Duration::from_millis(ms);
         let mut w = Watch::default();
-        assert!(w.step(at(0), Some("agy"), "", Some(10), false));
-        w.step(at(2000), Some("agy"), "", Some(1600), false);
+        assert!(w.step(at(0), Some("agy"), "", Some(10), false, false));
+        w.step(at(2000), Some("agy"), "", Some(1600), false, false);
         assert!(!w.attention, "startup banner");
-        w.step(at(3000), Some("agy"), "", Some(10), false);
-        w.step(at(7000), Some("agy"), "", Some(1600), false);
+        w.step(at(3000), Some("agy"), "", Some(10), false, false);
+        w.step(at(7000), Some("agy"), "", Some(1600), false, false);
         assert!(w.attention);
+    }
+
+    #[test]
+    fn prompts_ask_once_until_typed_into() {
+        let mut s = Signals::default();
+        s.feed(b"\x1b[1m Bash command\x1b[0m\r\n\x1b[2mDo you wa", false);
+        assert!(!s.asked);
+        s.feed(b"nt to proceed?\x1b[0m\r\n \xe2\x9d\xaf 1. Yes", false);
+        assert!(std::mem::take(&mut s.asked));
+        // Redrawn without the user answering: the same prompt.
+        s.feed(b"Do you want to proceed?", false);
+        assert!(!s.asked);
+        s.typed();
+        s.feed(b"Do you want to proceed?", true);
+        assert!(!s.asked, "echo of typing");
+        // Codex draws by diff: cursor moves instead of spaces.
+        s.feed(b"\x1b[5;3HWould\x1b[5;9Hyou\x1b[5;13Hlike to run", false);
+        assert!(s.asked);
+        let mut s = Signals::default();
+        s.feed(b"Doing the thing you want to see", false);
+        assert!(!s.asked);
+        // Antigravity's prompts, and the choices under them.
+        for prompt in [&b"\x1b[1mRun this command?\x1b[0m"[..], b"Allow access to this URL?", b" 2. Yes, and always allow 'git' in this conversation", b"No, and tell agy what to do differently"] {
+            let mut s = Signals::default();
+            s.feed(prompt, false);
+            assert!(s.asked, "{}", String::from_utf8_lossy(prompt));
+        }
+    }
+
+    #[test]
+    fn cues_finishing_or_asking() {
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let mut w = Watch::default();
+        w.step(at(0), Some("claude"), "◐ Work", None, false, false);
+        w.step(at(1000), Some("claude"), "✳ Work", None, false, false);
+        assert_eq!(w.cue.take(), None, "waits for a prompt drawn late");
+        w.step(at(2000), Some("claude"), "✳ Work", None, false, false);
+        assert_eq!(w.cue.take(), Some(Cue::Done));
+        w.step(at(3000), Some("claude"), "✳ Work", None, false, false);
+        assert_eq!(w.cue.take(), None, "once");
+        // Stopping to ask: just the question, whichever comes first.
+        w.step(at(4000), Some("claude"), "◐ Edit", None, false, false);
+        w.step(at(5000), Some("claude"), "✳ Edit", None, false, false);
+        w.step(at(5500), Some("claude"), "✳ Edit", None, false, true);
+        assert_eq!(w.cue.take(), Some(Cue::Ask));
+        w.step(at(7000), Some("claude"), "✳ Edit", None, false, false);
+        assert_eq!(w.cue.take(), None);
+        w.step(at(8000), Some("claude"), "◐ Edit", None, false, false);
+        w.step(at(8500), Some("claude"), "◐ Edit", None, false, true);
+        assert_eq!(w.cue.take(), Some(Cue::Ask));
+        w.step(at(9000), Some("claude"), "✳ Edit", None, false, false);
+        w.step(at(10000), Some("claude"), "✳ Edit", None, false, false);
+        assert_eq!(w.cue.take(), None);
+        // On screen: nothing to cue, though asking still covers the turn's end.
+        w.step(at(11000), Some("claude"), "◐ Look", None, false, false);
+        w.seen(at(11500));
+        w.step(at(12000), Some("claude"), "◐ Look", None, false, true);
+        assert_eq!(w.cue.take(), None);
+        w.step(at(12500), Some("claude"), "✳ Look", None, false, false);
+        w.step(at(16000), Some("claude"), "✳ Look", None, false, false);
+        assert_eq!(w.cue.take(), None, "asked 4.5s before finishing");
+        w.step(at(17000), Some("claude"), "◐ Look", None, false, false);
+        w.seen(at(17500));
+        w.step(at(18000), Some("claude"), "✳ Look", None, false, false);
+        w.step(at(19000), Some("claude"), "✳ Look", None, false, false);
+        assert_eq!(w.cue.take(), None, "finished in view");
+        // Looked away before the deferred cue came due: it plays.
+        w.step(at(30000), Some("claude"), "◐ Away", None, false, false);
+        w.step(at(31000), Some("claude"), "✳ Away", None, false, false);
+        w.step(at(32000), Some("claude"), "✳ Away", None, false, false);
+        assert_eq!(w.cue.take(), Some(Cue::Done));
+        // A startup banner isn't a finished turn.
+        let mut w = Watch::default();
+        w.step(at(0), Some("agy"), "", Some(10), false, false);
+        w.step(at(2000), Some("agy"), "", Some(1600), false, false);
+        w.step(at(4000), Some("agy"), "", Some(3600), false, false);
+        assert_eq!(w.cue.take(), None);
     }
 }
