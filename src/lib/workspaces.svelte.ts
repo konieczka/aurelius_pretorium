@@ -395,6 +395,12 @@ function init() {
     store.set("ws:" + id, JSON.stringify({ folder, root, focused: "" }));
     store.set("win:main", JSON.stringify({ open: [id], active: id }));
   }
+  // The main window always opens on launch, even if it was closed before quitting: then it becomes one of the windows
+  // that were still open, rather than coming back with a workspace no window had.
+  if (win.label === "main" && !store.get("win:main")) {
+    const k = Object.keys(localStorage).find((k) => k.startsWith("win:"));
+    if (k) store.set("win:main", store.get(k)!), store.remove(k);
+  }
 
   const w = loadWin("win:" + win.label);
   const open = (w?.open ?? []).filter((id) => ws.all.some((m) => m.id === id) && !ownerWindow(id));
