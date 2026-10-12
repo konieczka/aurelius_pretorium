@@ -233,10 +233,36 @@ pub async fn web_hide(app: AppHandle, id: String) -> Res<()> {
     }
 }
 
+/// Tab id -> its page zoom, when not 100%. The view keeps it across navigations; this is only to step from.
+static ZOOMS: Mutex<Option<HashMap<String, f64>>> = Mutex::new(None);
+// Safari's steps
+const ZOOM_STEPS: [f64; 12] = [0.5, 0.75, 0.85, 1.0, 1.15, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
+
+/// ⌘= / ⌘- / ⌘0 with a browser tab focused zoom its page only, not the app: in (1), out (-1) or back to 100% (0).
+pub fn zoom(app: &AppHandle, id: &str, dir: i32) {
+    let Ok(wv) = get(app, id) else { return };
+    let mut zooms = ZOOMS.lock().unwrap();
+    let zooms = zooms.get_or_insert_default();
+    let cur = zooms.get(id).copied().unwrap_or(1.0);
+    let level = match dir {
+        0 => 1.0,
+        1 => ZOOM_STEPS.into_iter().find(|&s| s > cur + 1e-6).unwrap_or(cur),
+        _ => ZOOM_STEPS.into_iter().rev().find(|&s| s < cur - 1e-6).unwrap_or(cur),
+    };
+    if wv.set_zoom(level).is_ok() {
+        if level == 1.0 {
+            zooms.remove(id);
+        } else {
+            zooms.insert(id.to_string(), level);
+        }
+    }
+}
+
 /// The tab was closed (or its workspace left this window): the page goes.
 #[tauri::command]
 pub async fn web_close(app: AppHandle, id: String) -> Res<()> {
     app.state::<Views>().0.lock().unwrap().retain(|_, v| *v != id);
+    ZOOMS.lock().unwrap().get_or_insert_default().remove(&id);
     match app.get_webview(&label(&id)) {
         Some(wv) => wv.close().map_err(err),
         None => Ok(()),

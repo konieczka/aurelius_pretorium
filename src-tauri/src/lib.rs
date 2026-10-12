@@ -1125,7 +1125,11 @@ pub fn run() {
                     None => { let _ = page.reload(); }
                 },
                 "force-reload" => force_reload(&page),
-                // Zoom level lives in the frontend (persisted, and read back for drag math).
+                // A focused browser tab zooms just its page, which keeps the keyboard
+                id @ ("zoom-in" | "zoom-out" | "zoom-reset") if browser.is_some() => {
+                    web::zoom(h, browser.as_deref().unwrap_or_default(), match id { "zoom-in" => 1, "zoom-out" => -1, _ => 0 });
+                }
+                // The app's zoom level lives in the frontend (persisted, and read back for drag math).
                 id @ ("zoom-in" | "zoom-out" | "zoom-reset") => { let _ = h.emit_to(tauri::EventTarget::webview_window(page.label()), "zoom", id); }
                 _ => {}
             }
