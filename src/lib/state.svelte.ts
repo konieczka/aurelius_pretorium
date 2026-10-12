@@ -169,7 +169,7 @@ export function openBrowserBeside(url: string, beside: string) {
   app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url }).id;
 }
 
-/** New terminal tab that runs `command` once its shell starts: in the focused pane, or the rightmost one. */
+/** New terminal tab that runs `command` once its shell starts: in the focused pane, or the rightmost one. Returns its id. */
 export function runInTerminal(cwd: string, command: string, where: "focused" | "rightmost" = "focused") {
   closeViews();
   const p = where === "rightmost" ? L.rightmost(app.root) : focusedPane();
@@ -178,6 +178,7 @@ export function runInTerminal(cwd: string, command: string, where: "focused" | "
   p.tabs.push(t);
   p.active = p.tabs.length - 1;
   app.focused = p.id;
+  return t.id;
 }
 
 export function splitFocused(dir: "row" | "col") {

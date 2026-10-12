@@ -1,13 +1,20 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Plus } from "@lucide/svelte";
+  import { Plus, ScanSearch } from "@lucide/svelte";
   import ProviderIcon from "./ProviderIcon.svelte";
   import { PROVIDERS, providerName, type Provider } from "./usageStats";
-  import { app, runInTerminal } from "./state.svelte";
+  import { app, load, runInTerminal, store } from "./state.svelte";
+  import { agentProvider, typeIntoAgent } from "./agents.svelte";
+  import { git } from "./GitPanel.svelte";
+  import { reviewLaunch } from "./review";
 
   // The Fleet sidebar's New Agent button: a menu of every agent, those not installed greyed out; picking one starts it
-  // in a new terminal in the sidebar's folder, in the rightmost pane.
+  // in a new terminal in the sidebar's folder, in the rightmost pane. With `review`, the Review button: the agent
+  // starts out reviewing the folder's branch, and with Auto-fix on (kept between openings) goes on to fix what it found.
   type Launch = { agent: Provider; command: string | null };
+
+  let { review = false }: { review?: boolean } = $props();
+  let fix = $state(load("reviewFix", false));
 
   let open = $state(false);
   let sel = $state(-1);
@@ -32,7 +39,15 @@
   function start(l: Launch) {
     if (!l.command) return;
     open = false;
-    runInTerminal(app.workspace, l.command, "rightmost");
+    if (!review) return void runInTerminal(app.workspace, l.command, "rightmost");
+    const r = reviewLaunch(l.agent, l.command, fix);
+    const id = runInTerminal(app.workspace, r.command, "rightmost");
+    typeIntoAgent(id, Object.keys(agentProvider).find((c) => agentProvider[c] === l.agent)!, r.steps);
+  }
+
+  function toggleFix() {
+    fix = !fix;
+    store.set("reviewFix", String(fix));
   }
 
   function onKey(e: KeyboardEvent) {
@@ -50,12 +65,22 @@
 <svelte:window onkeydown={onKey} onpointerdown={(e) => open && !root.contains(e.target as Node) && (open = false)} />
 
 <div class="new" bind:this={root}>
-  <button class="icon-btn" class:on={open} onclick={toggle} title="New agent" aria-label="New agent" aria-haspopup="menu" aria-expanded={open}>
-    <Plus size={15} strokeWidth={1.5} />
-  </button>
+  {#if review}
+    <button class="icon-btn" class:on={open} onclick={toggle} disabled={!git.root} title={git.root ? "Code review" : "Code review: not a git repository"} aria-label="Code review" aria-haspopup="menu" aria-expanded={open}>
+      <ScanSearch size={15} strokeWidth={1.5} />
+    </button>
+  {:else}
+    <button class="icon-btn" class:on={open} onclick={toggle} title="New agent" aria-label="New agent" aria-haspopup="menu" aria-expanded={open}>
+      <Plus size={15} strokeWidth={1.5} />
+    </button>
+  {/if}
   {#if open}
     <div class="menu glass-float" role="menu">
-      <div class="head">Start an agent in <b>{app.workspace.split("/").pop()}</b></div>
+      {#if review}
+        <div class="head">Review <b>{git.status?.head ?? "this branch"}</b> in <b>{app.workspace.split("/").pop()}</b></div>
+      {:else}
+        <div class="head">Start an agent in <b>{app.workspace.split("/").pop()}</b></div>
+      {/if}
       {#each items as l, i (l.agent)}
         <button class="item" class:sel={i === sel} role="menuitem" disabled={!l.command} onmouseenter={() => l.command && (sel = i)} onclick={() => start(l)} title={l.command ? `Runs ${l.command}` : undefined}>
           <span class="icon"><ProviderIcon provider={l.agent} size={15} /></span>
@@ -63,6 +88,12 @@
           {#if launchers && !l.command}<span class="note">Not installed</span>{/if}
         </button>
       {/each}
+      {#if review}
+        <button class="fix" role="menuitemcheckbox" aria-checked={fix} onclick={toggleFix} title="Once the review is done, fix every issue it found">
+          <span class="name">Auto-fix</span>
+          <span class="switch" class:on={fix}></span>
+        </button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -125,6 +156,53 @@
   .icon {
     display: flex;
   }
+  .fix {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 32px;
+    margin-top: 4px;
+    padding: 0 8px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 9px 9px;
+    background: none;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .fix:hover {
+    color: var(--foreground);
+  }
+  .switch {
+    position: relative;
+    width: 26px;
+    height: 15px;
+    border-radius: 8px;
+    background: var(--hover);
+    box-shadow: inset 0 0 0 1px var(--border);
+    transition: background var(--dur-quick) var(--ease-standard);
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--muted-foreground);
+    transition: transform var(--dur-quick) var(--ease-standard), background var(--dur-quick) var(--ease-standard);
+  }
+  .switch.on {
+    background: var(--gold);
+    box-shadow: none;
+  }
+  .switch.on::after {
+    background: var(--chip-on);
+    transform: translateX(11px);
+  }
   .name {
     flex: 1;
   }
@@ -141,6 +219,10 @@
   @media (prefers-reduced-motion: reduce) {
     .menu {
       animation: none;
+    }
+    .switch,
+    .switch::after {
+      transition: none;
     }
   }
 </style>

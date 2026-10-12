@@ -157,6 +157,7 @@
           <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
         {:else if app.sidebar === "fleet"}
+          <NewAgent review />
           <NewAgent />
         {:else if app.sidebar === "git" && git.root}
           <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>

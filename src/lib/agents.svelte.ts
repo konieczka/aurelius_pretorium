@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import * as L from "./layout";
 import { allTabs, app } from "./state.svelte";
 import type { Provider } from "./usageStats";
+import { turnDone, type Turn } from "./agentTurn";
 
 // Coding agents running in terminals. A term tab's `agent` is the agent its shell last had in the foreground; it's
 // saved with the layout, so a shell started fresh for the tab (app relaunch, workspace reopened) starts it again.
@@ -38,6 +39,50 @@ export function relaunchCommand(t: L.Tab) {
   return t.agent;
 }
 
+/** What to type into an agent: "ready" once it's up and its screen has settled, "done" once it has worked and
+ * stopped (finished the turn the step before started). `keys` go in one chunk at a time, apart: a burst reads as a paste. */
+export type Step = { when: "ready" | "done"; keys: string[] };
+type Script = { agent: string; steps: Step[]; from: number; up: number | null; turn: Turn; typing: boolean };
+
+// Tabs started with something to type into their agent (a review, then its fixes), until it's all typed or the agent
+// quits (or never shows up).
+const scripts = new Map<string, Script>();
+
+/** Type `steps` into tab `tabId`'s agent (`agent`: its command, as the backend reports it) as it gets to each. */
+export function typeIntoAgent(tabId: string, agent: string, steps: Step[]) {
+  if (steps.length) scripts.set(tabId, { agent, steps, from: Date.now(), up: null, turn: { requested: false, started: null }, typing: false });
+}
+
+async function typeKeys(id: string, keys: string[]) {
+  for (const [i, k] of keys.entries()) {
+    if (i) await new Promise((r) => setTimeout(r, 500));
+    await invoke("pty_write", { id, data: k }).catch(() => {});
+  }
+}
+
+function runScripts(found: Record<string, Shell>, now: number) {
+  for (const [id, sc] of scripts) {
+    const s = found[id];
+    if (s?.agent !== sc.agent) {
+      if (sc.up !== null || now - sc.from > 60_000) scripts.delete(id); // it quit, or never started
+      continue;
+    }
+    sc.up ??= now;
+    if (sc.typing) continue;
+    const step = sc.steps[0];
+    let go = false;
+    // Ready: nothing drawn for a while (Codex has nothing to draw when idle), or up long enough that it must be.
+    if (step.when === "ready") go = !s.busy && !s.asking && ((s.quiet ?? 0) >= 1500 || now - sc.up > 10_000);
+    else go = turnDone(sc.turn, s, now);
+    if (!go) continue;
+    sc.steps.shift();
+    sc.turn = { requested: true, started: null };
+    if (!sc.steps.length) scripts.delete(id);
+    sc.typing = true;
+    void typeKeys(id, step.keys).finally(() => { sc.typing = false; });
+  }
+}
+
 /** Tabs on screen here: the active tab of each pane, if this window has focus. */
 const inView = () => (document.hasFocus() ? L.panes(app.root).flatMap((p) => p.tabs[p.active]?.id ?? []) : []);
 
@@ -66,6 +111,7 @@ async function poll() {
     if (activity[id] !== a) a ? (activity[id] = a) : delete activity[id];
   }
   for (const id of Object.keys(activity)) if (!(id in found)) delete activity[id]; // shell gone
+  runScripts(found, now);
 }
 
 export function watchAgents() {
