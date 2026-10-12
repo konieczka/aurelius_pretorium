@@ -1,6 +1,6 @@
 [package]
 name = "fleet_command"
-version = "0.2.1"
+version = "0.2.2"
 description = "Pretorium: command a fleet of coding agents"
 authors = ["Michał Konieczka"]
 edition = "2021"
