@@ -119,14 +119,17 @@
 
   // Aurelius theme in CSS variables only, so light/dark switching restyles editors live.
   export const aurelius = [
+    EditorView.contentAttributes.compute(["selection"], (st) => ({ class: st.selection.ranges.some((r) => !r.empty) ? "cm-hasSelection" : "" })),
     EditorView.theme({
       "&": { height: "100%", color: "var(--foreground)", backgroundColor: "var(--surface)" },
       ".cm-scroller": { fontFamily: "var(--font-mono)", fontSize: "13px", lineHeight: "1.55" },
       ".cm-content": { caretColor: "var(--foreground)" },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--foreground)" },
-      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "var(--gold-soft) !important" },
+      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in oklch, var(--gold) 28%, var(--surface)) !important" },
       ".cm-gutters": { backgroundColor: "var(--surface)", color: "var(--muted-foreground)", border: "none" },
       ".cm-activeLine": { backgroundColor: "var(--accent)" },
+      // The selection is solid and sits under the text, so the active line (painted on the text lines) must not cover it.
+      ".cm-hasSelection .cm-activeLine": { backgroundColor: "transparent" },
       ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--foreground)" },
       ".cm-selectionMatch": { backgroundColor: "var(--gold-soft)" },
       "&.cm-focused .cm-matchingBracket": { backgroundColor: "var(--gold-soft)", outline: "1px solid var(--gold-ring)" },
