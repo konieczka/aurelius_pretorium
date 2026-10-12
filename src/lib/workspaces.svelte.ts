@@ -228,9 +228,10 @@ export async function closeWorkspace(id: string) {
   if (ws.open.length > 1) release(id);
 }
 
+/** Delete `id` for good, once confirmed (wherever it is but another window). Resolves to whether it was deleted. */
 export async function deleteWorkspace(id: string) {
-  if (ownerWindow(id)) return message(`“${nameOf(id)}” is open in another window. Delete it from there.`);
-  if (!(await ask(`Delete workspace “${nameOf(id)}”? Its terminals will be closed and unsaved changes discarded.`, { kind: "warning" }))) return;
+  if (ownerWindow(id)) return message(`“${nameOf(id)}” is open in another window. Delete it from there.`), false;
+  if (!(await ask(`Delete workspace “${nameOf(id)}”? Its terminals will be closed and unsaved changes discarded.`, { kind: "warning" }))) return false;
   const l = id === ws.active ? snapshot() : (held.get(id) ?? loadLayout(id));
   if (ws.open.includes(id)) {
     if (ws.open.length === 1) createWorkspace();
@@ -240,6 +241,7 @@ export async function deleteWorkspace(id: string) {
   ws.all = ws.all.filter((m) => m.id !== id);
   saveMeta();
   store.remove("ws:" + id);
+  return true;
 }
 
 /** Move `id` into a new window next to this one (menu action; dragging a tab out does this live, see tearOut). */

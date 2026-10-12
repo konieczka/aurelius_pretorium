@@ -1,7 +1,9 @@
 <script module lang="ts">
   // VS Code-style quick pick: one instance rendered by the app shell, driven by pick() / prompt().
-  // `removable` items get an X (and ⌘⌫) that hands them to pick()'s `remove` and drops them from the list.
-  export type Item = { label: string; detail?: string; hint?: string; value: string; removable?: boolean };
+  // `removable` items get an X (and ⌘⌫) that hands them to pick()'s `remove` and drops them from the list, unless
+  // `remove` returns false (e.g. a confirmation was cancelled). A string means a delete: a trash can, with it as tooltip.
+  export type Item = { label: string; detail?: string; hint?: string; value: string; removable?: boolean | string };
+  type Remove = (value: string) => unknown;
 
   const quick = $state({
     open: false,
@@ -9,15 +11,15 @@
     items: null as Item[] | null, // null = free-text prompt
     value: "", // initial text
     resolve: (_: string | null) => {},
-    remove: (_: string) => {},
+    remove: (() => {}) as Remove,
   });
 
-  function show(placeholder: string, items: Item[] | null, value = "", remove = (_: string) => {}) {
+  function show(placeholder: string, items: Item[] | null, value = "", remove: Remove = () => {}) {
     quick.resolve(null); // a newer picker replaces any open one
     return new Promise<string | null>((resolve) => Object.assign(quick, { open: true, placeholder, items, value, resolve, remove }));
   }
   /** Resolves to the chosen item's value, or null if dismissed. */
-  export const pick = (placeholder: string, items: Item[], remove?: (value: string) => void) => show(placeholder, items, "", remove);
+  export const pick = (placeholder: string, items: Item[], remove?: Remove) => show(placeholder, items, "", remove);
   /** It's on screen (browser tabs hide their pages, which would cover it). */
   export const picking = () => quick.open;
   /** Resolves to the entered text (trimmed, non-empty), or null if dismissed. */
@@ -25,7 +27,7 @@
 </script>
 
 <script lang="ts">
-  import { X } from "@lucide/svelte";
+  import { Trash2, X } from "@lucide/svelte";
 
   let query = $state("");
   $effect(() => {
@@ -43,9 +45,9 @@
     sel = 0;
     r(value);
   }
-  function remove(it: Item) {
-    quick.remove(it.value);
-    quick.items = quick.items!.filter((i) => i !== it);
+  async function remove(it: Item) {
+    if ((await quick.remove(it.value)) === false || !quick.items) return;
+    quick.items = quick.items.filter((i) => i !== it);
     sel = Math.min(sel, Math.max(shown.length - 1, 0));
   }
   function key(e: KeyboardEvent) {
@@ -82,7 +84,9 @@
               {#if it.detail}<span class="detail">{it.detail}</span>{/if}
               {#if it.hint}<span class="hint">{it.hint}</span>{/if}
               {#if it.removable}
-                <button class="icon-btn remove" title="Remove from list (⌘⌫)" onclick={(e) => (e.stopPropagation(), remove(it))}><X size={13} strokeWidth={1.5} /></button>
+                <button class="icon-btn remove" class:delete={typeof it.removable === "string"} title="{typeof it.removable === 'string' ? it.removable : 'Remove from list'} (⌘⌫)" onclick={(e) => (e.stopPropagation(), remove(it))}>
+                  {#if typeof it.removable === "string"}<Trash2 size={13} strokeWidth={1.5} />{:else}<X size={13} strokeWidth={1.5} />{/if}
+                </button>
               {/if}
             </div>
           {:else}
@@ -168,8 +172,11 @@
     align-self: center;
     width: 22px;
     height: 22px;
-    margin: -4px -6px -4px 0;
+    margin: -4px -6px -4px auto; /* right edge, also when there's no detail to push it there */
     visibility: hidden;
+  }
+  .remove.delete:hover {
+    color: var(--destructive);
   }
   .item.sel .remove {
     visibility: visible;

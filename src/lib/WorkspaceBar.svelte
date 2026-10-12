@@ -49,13 +49,17 @@
     else if (v === "delete") deleteWorkspace(id);
   }
 
+  // Closed workspaces can be deleted from here (open ones from their tab's menu).
   async function add() {
     const v = await pick("New workspace, or open one", [
       { label: "+ New workspace", value: "\0new" },
       ...ws.all
         .filter((m) => !ws.open.includes(m.id))
-        .map((m) => ({ label: m.name, detail: ownerWindow(m.id) ? "Open in another window" : undefined, value: m.id })),
-    ]);
+        .map((m) => {
+          const elsewhere = !!ownerWindow(m.id);
+          return { label: m.name, detail: elsewhere ? "Open in another window" : undefined, value: m.id, removable: !elsewhere && "Delete workspace" };
+        }),
+    ], deleteWorkspace);
     if (v === "\0new") createWorkspace();
     else if (v) openHere(v);
   }
