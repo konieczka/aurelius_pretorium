@@ -301,10 +301,17 @@ struct Shell {
     since: u64,      // ms since the agent came or went, or started or stopped working
 }
 
+#[derive(Clone, serde::Serialize)]
+struct Cued {
+    id: String,
+    cue: status::Cue,
+}
+
 /// What each shell is doing, by tab id. Only tabs with a shell are listed. Polled by every window, each passing the
-/// tabs it has on screen (`seen`): what's in view in some window doesn't need attention.
+/// tabs it has on screen (`seen`): what's in view in some window doesn't need attention. An agent out of view that
+/// asks something or finishes is told to every window (`agent-cue`, for a notice) and makes a sound.
 #[tauri::command]
-async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<String, Shell>> {
+async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) -> Res<HashMap<String, Shell>> {
     let mut jobs: Vec<(String, i32)> = Vec::new(); // tab id, foreground process group (other than the shell)
     #[cfg(unix)]
     for (id, s) in ptys.sessions.lock().unwrap().iter() {
@@ -332,7 +339,7 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
     }
     let now = Instant::now();
     let mut shells = HashMap::new();
-    let mut cue = None; // the most pressing of this poll's: several agents finishing together make one sound
+    let mut cues = Vec::new();
     for (id, s) in ptys.sessions.lock().unwrap().iter_mut() {
         if seen.contains(id) {
             s.watch.seen(now);
@@ -352,7 +359,9 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
         let asked = std::mem::take(&mut o.signals.asked);
         let agent = agent.map(|(a, _)| *a);
         let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang, asked);
-        cue = cue.max(s.watch.cue.take());
+        if let Some(cue) = s.watch.cue.take() {
+            cues.push(Cued { id: id.clone(), cue });
+        }
         shells.insert(id.clone(), Shell {
             agent: agent.map(String::from),
             quiet,
@@ -363,8 +372,12 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>) -> Res<HashMap<Str
             since: now.saturating_duration_since(s.watch.changed).as_millis() as u64,
         });
     }
-    if let Some(c) = cue {
+    // The most pressing of this poll's: several agents finishing together make one sound.
+    if let Some(c) = cues.iter().map(|c| c.cue).max() {
         play(c);
+    }
+    for c in cues {
+        let _ = app.emit("agent-cue", c);
     }
     Ok(shells)
 }

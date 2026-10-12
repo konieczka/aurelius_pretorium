@@ -7,6 +7,7 @@
   import StatusBar from "$lib/StatusBar.svelte";
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
   import Toast from "$lib/Toast.svelte";
+  import Notices from "$lib/Notices.svelte";
   import FileTree, { treeMenu } from "$lib/FileTree.svelte";
   import { hasPreview } from "$lib/media";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
@@ -187,6 +188,7 @@
   </div>
   <QuickPick />
   <Toast />
+  <Notices />
 {:else}
   <div class="welcome">
     <span class="mark big"></span>

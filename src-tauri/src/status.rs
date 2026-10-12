@@ -140,8 +140,9 @@ pub fn busy(agent: &str, title: &str, quiet: Option<u64>) -> bool {
     }
 }
 
-/// A sound worth playing: the agent asks something, or finished its turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Worth a sound and a notice: the agent asks something, or finished its turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Cue {
     Done,
     Ask,
