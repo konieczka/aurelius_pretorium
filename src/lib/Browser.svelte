@@ -13,6 +13,7 @@
   const webTab = (id: string) => allTabs().find((t): t is WebTab => t.id === id && t.kind === "web");
 
   const loading = $state<Record<string, boolean>>({}); // tab id -> page loading
+  const nav = $state<Record<string, { back: boolean; forward: boolean }>>({}); // tab id -> where Back/Forward can go
   /** Tab id -> its page's icon (a data: URL) and the origin it's for. Not saved: pages send it again as they load. */
   export const icons = $state<Record<string, { src: string; origin: string }>>({});
   const originOf = (url: string) => URL.parse(url)?.origin ?? "";
@@ -39,6 +40,7 @@
   export function disposeBrowser(id: string, kill = true) {
     send(id, () => invoke(kill ? "web_close" : "web_hide", { id }));
     delete loading[id];
+    delete nav[id];
     delete icons[id];
   }
 
@@ -52,12 +54,13 @@
   export const browserGo = (id: string, delta: number) => invoke("web_go", { id, delta }).catch(() => {});
 
   // Pages report where they are and what they're called, to every window: the one with the tab takes it.
-  listen<{ id: string; url: string; title?: string; loading?: boolean }>("web-state", ({ payload: p }) => {
+  listen<{ id: string; url: string; title?: string; loading?: boolean; back?: boolean; forward?: boolean }>("web-state", ({ payload: p }) => {
     const t = webTab(p.id);
     if (!t) return;
     if (p.url && p.url !== "about:blank") t.url = p.url;
     if (p.title !== undefined) t.title = p.title || undefined;
     if (p.loading !== undefined) loading[p.id] = p.loading;
+    if (p.back !== undefined) nav[p.id] = { back: p.back, forward: !!p.forward };
     // Off to another site: its icon isn't this one (it sends its own once it has loaded)
     if (p.loading && icons[p.id] && originOf(p.url) !== icons[p.id].origin) delete icons[p.id];
   });
@@ -171,8 +174,8 @@
 
 <div class="browser">
   <div class="toolbar">
-    <button class="icon-btn" onclick={() => browserGo(id, -1)} disabled={!tab.url} title="Back (⌘[)"><ArrowLeft size={14} strokeWidth={1.5} /></button>
-    <button class="icon-btn" onclick={() => browserGo(id, 1)} disabled={!tab.url} title="Forward (⌘])"><ArrowRight size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={() => browserGo(id, -1)} disabled={!tab.url || nav[id]?.back === false} title="Back (⌘[)"><ArrowLeft size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={() => browserGo(id, 1)} disabled={!tab.url || nav[id]?.forward === false} title="Forward (⌘])"><ArrowRight size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={reload} disabled={!tab.url} title={loading[id] ? "Stop" : "Reload (⌘R)"}>
       {#if loading[id]}<X size={14} strokeWidth={1.5} />{:else}<RotateCw size={13} strokeWidth={1.5} />{/if}
     </button>

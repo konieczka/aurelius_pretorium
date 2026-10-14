@@ -29,11 +29,93 @@ struct State {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     loading: Option<bool>,
+    /// Whether its history has somewhere to go back / forward to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    back: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forward: Option<bool>,
 }
 
 fn emit_state(wv: &Webview, url: &Url, title: Option<String>, loading: Option<bool>) {
     let id = wv.label().trim_start_matches(PREFIX).to_string();
-    let _ = wv.app_handle().emit("web-state", State { id, url: url.to_string(), title, loading });
+    let _ = wv.app_handle().emit("web-state", State { id, url: url.to_string(), title, loading, back: None, forward: None });
+}
+
+/// Where a page is, watched on its WKWebView: page loads don't cover in-page navigation (history.pushState,
+/// replaceState, #fragments), which single-page apps route with. Also whether Back and Forward have anywhere to go.
+#[cfg(target_os = "macos")]
+mod watch {
+    use super::State;
+    use objc2::{define_class, msg_send, rc::Retained, runtime::{AnyObject, NSObject}, AllocAnyThread, DefinedClass};
+    use objc2_foundation::{NSString, NSURL};
+    use std::{cell::RefCell, collections::HashMap, ffi::c_void};
+    use tauri::{AppHandle, Emitter};
+
+    const KEYS: [&str; 3] = ["URL", "canGoBack", "canGoForward"];
+
+    pub struct Ivars {
+        view: Retained<AnyObject>,
+        app: AppHandle,
+        id: String,
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[ivars = Ivars]
+        pub struct Watcher;
+
+        impl Watcher {
+            #[unsafe(method(observeValueForKeyPath:ofObject:change:context:))]
+            fn observe(&self, _key: *mut NSString, _of: *mut AnyObject, _change: *mut AnyObject, _ctx: *mut c_void) {
+                self.report();
+            }
+        }
+    );
+
+    impl Watcher {
+        fn report(&self) {
+            let Ivars { view, app, id } = self.ivars();
+            let (url, back, forward) = unsafe {
+                let url: Option<Retained<NSURL>> = msg_send![&**view, URL];
+                let back: bool = msg_send![&**view, canGoBack];
+                let forward: bool = msg_send![&**view, canGoForward];
+                (url.and_then(|u| u.absoluteString()).map(|s| s.to_string()), back, forward)
+            };
+            let state = State { id: id.clone(), url: url.unwrap_or_default(), title: None, loading: None, back: Some(back), forward: Some(forward) };
+            let _ = app.emit("web-state", state);
+        }
+    }
+
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            let view = &*self.ivars().view;
+            for key in KEYS {
+                let _: () = unsafe { msg_send![view, removeObserver: &*self, forKeyPath: &*NSString::from_str(key)] };
+            }
+        }
+    }
+
+    thread_local! {
+        /// Tab id -> its page's watcher. Main thread only, like the views.
+        static WATCHERS: RefCell<HashMap<String, Retained<Watcher>>> = RefCell::default();
+    }
+
+    /// Main thread: watch tab `id`'s WKWebView, reporting where it is right away.
+    pub fn start(app: AppHandle, id: String, view: *mut c_void) {
+        let Some(view) = (unsafe { Retained::retain(view as *mut AnyObject) }) else { return };
+        let w = Watcher::alloc().set_ivars(Ivars { view: view.clone(), app, id: id.clone() });
+        let w: Retained<Watcher> = unsafe { msg_send![super(w), init] };
+        for key in KEYS {
+            // NSKeyValueObservingOptionNew | Initial
+            let _: () = unsafe { msg_send![&*view, addObserver: &*w, forKeyPath: &*NSString::from_str(key), options: 1usize | 4, context: std::ptr::null_mut::<c_void>()] };
+        }
+        WATCHERS.with(|m| m.borrow_mut().insert(id, w));
+    }
+
+    /// Main thread: stop watching (before the view goes: KVO mustn't outlive it).
+    pub fn stop(id: &str) {
+        WATCHERS.with(|m| m.borrow_mut().remove(id));
+    }
 }
 
 // The page's best icon for a 13px tab: an SVG, else the smallest at least 32px (sharp at 2x), else the biggest; ones
@@ -206,7 +288,6 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
                 find_icon(&wv);
             }
         })
-        // Also how in-page navigation (history.pushState) shows: single-page apps retitle on it
         .on_document_title_changed(|wv, title| {
             if let Ok(u) = wv.url() {
                 emit_state(&wv, &u, Some(title), None);
@@ -218,7 +299,8 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
     {
         let views = app.clone();
         let _ = wv.with_webview(move |v| {
-            views.state::<Views>().0.lock().unwrap().insert(v.inner() as usize, id);
+            views.state::<Views>().0.lock().unwrap().insert(v.inner() as usize, id.clone());
+            watch::start(views, id, v.inner());
         });
     }
     round(&wv, radius);
@@ -264,7 +346,11 @@ pub async fn web_close(app: AppHandle, id: String) -> Res<()> {
     app.state::<Views>().0.lock().unwrap().retain(|_, v| *v != id);
     ZOOMS.lock().unwrap().get_or_insert_default().remove(&id);
     match app.get_webview(&label(&id)) {
-        Some(wv) => wv.close().map_err(err),
+        Some(wv) => {
+            #[cfg(target_os = "macos")]
+            let _ = wv.with_webview(move |_| watch::stop(&id));
+            wv.close().map_err(err)
+        }
         None => Ok(()),
     }
 }
@@ -286,10 +372,20 @@ pub async fn web_navigate(app: AppHandle, id: String, url: String) -> Res<()> {
     get(&app, &id)?.navigate(url).map_err(err)
 }
 
-/// Back (-1) or forward (1) in the tab's history.
+/// Back (-1) or forward (1) in the tab's history: the view's own, as Safari's buttons do, not the page's script.
 #[tauri::command]
 pub async fn web_go(app: AppHandle, id: String, delta: i32) -> Res<()> {
-    get(&app, &id)?.eval(format!("history.go({delta})")).map_err(err)
+    let wv = get(&app, &id)?;
+    #[cfg(target_os = "macos")]
+    return wv
+        .with_webview(move |v| unsafe {
+            use objc2::{msg_send, runtime::AnyObject};
+            let v = v.inner() as *mut AnyObject;
+            let _: *mut AnyObject = if delta < 0 { msg_send![v, goBack] } else { msg_send![v, goForward] };
+        })
+        .map_err(err);
+    #[cfg(not(target_os = "macos"))]
+    wv.eval(format!("history.go({delta})")).map_err(err)
 }
 
 #[tauri::command]
