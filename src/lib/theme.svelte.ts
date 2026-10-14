@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isPalette, PALETTE_TRANSITION_MS, resolvePalette, shouldAnimatePaletteChange, type Palette } from "./palette";
+import { isPalette, PALETTE_COLOR_PROPERTIES, PALETTE_TRANSITION_MS, resolvePalette, shouldAnimatePaletteChange, type Palette } from "./palette";
 
 export type Mode = "light" | "dark" | "system";
 
@@ -35,7 +35,7 @@ export const theme = $state({
 let workspaceOverride: Palette | null = null;
 // The first palette a window shows is its launch palette: it must not fade in from the global default.
 let sawWorkspacePalette = false;
-let animTimer: ReturnType<typeof setTimeout> | undefined;
+let animFrame = 0;
 
 const reducedMotion = () => {
   try {
@@ -45,25 +45,53 @@ const reducedMotion = () => {
   }
 };
 
-/** Animate the inherited colour tokens for one palette switch. */
+function finishPaletteTransition() {
+  cancelAnimationFrame(animFrame);
+  const root = document.documentElement;
+  for (const name of PALETTE_COLOR_PROPERTIES) root.style.removeProperty(name);
+  root.style.removeProperty("--shadow-tint");
+  theme.transitioning = false;
+}
+
+/** Drive the inherited colours each frame: WebKit's custom-property CSS transitions
+ * did not interpolate in the full workspace view, even though they were running. */
 function beginPaletteTransition(next: Palette, first: boolean) {
   const root = document.documentElement;
   if (first || reducedMotion()) {
-    clearTimeout(animTimer);
-    root.classList.remove("palette-anim");
-    theme.transitioning = false;
+    finishPaletteTransition();
     return;
   }
   if (!shouldAnimatePaletteChange(theme.palette, next)) return;
-  root.style.setProperty("--palette-duration", `${PALETTE_TRANSITION_MS}ms`);
-  root.classList.add("palette-anim");
+  cancelAnimationFrame(animFrame);
+  // A scoped swatch resolves the target even while the root still shows an earlier
+  // frame. This also lets a rapid workspace switch continue from its visible colours.
+  const target = document.createElement("div");
+  target.dataset.palette = next;
+  target.hidden = true;
+  root.appendChild(target);
+  const channels = (hex: string) => [1, 3, 5, 7].map((i) => parseInt(hex.slice(i, i + 2) || "ff", 16));
+  const colors = PALETTE_COLOR_PROPERTIES.map((name) => ({ name, from: channels(cssHex(name)), to: channels(cssHex(name, target)) }));
+  const shadowFrom = getComputedStyle(root).getPropertyValue("--shadow-tint").trim().split(/\s+/).map(Number);
+  const shadowTo = getComputedStyle(target).getPropertyValue("--shadow-tint").trim().split(/\s+/).map(Number);
+  target.remove();
+  const paint = (progress: number) => {
+    const mix = (from: number, to: number) => from + (to - from) * progress;
+    for (const { name, from, to } of colors) {
+      const [r, g, b, a] = from.map((v, i) => mix(v, to[i]));
+      root.style.setProperty(name, `rgb(${r} ${g} ${b} / ${a / 255})`);
+    }
+    root.style.setProperty("--shadow-tint", shadowFrom.map((v, i) => mix(v, shadowTo[i])).join(" "));
+  };
+  paint(0); // hold the previous colours while apply() changes the palette attribute
   theme.transitioning = true;
-  void root.offsetWidth; // settle the class before apply() flips data-palette, so the change transitions
-  clearTimeout(animTimer);
-  animTimer = setTimeout(() => {
-    root.classList.remove("palette-anim");
-    theme.transitioning = false;
-  }, PALETTE_TRANSITION_MS + 60);
+  const started = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min((now - started) / PALETTE_TRANSITION_MS, 1);
+    if (progress >= 1 || reducedMotion()) return finishPaletteTransition();
+    paint(progress * progress * (3 - 2 * progress));
+    animFrame = requestAnimationFrame(tick);
+  };
+  animFrame = requestAnimationFrame(tick);
 }
 
 function recompute(first = false) {
@@ -84,6 +112,7 @@ function apply() {
 }
 
 export function setMode(mode: Mode) {
+  finishPaletteTransition();
   theme.mode = mode;
   write("theme", mode);
   apply();
@@ -108,6 +137,7 @@ export function applyWorkspacePalette(override: Palette | null | undefined) {
 // Other windows share localStorage: follow their changes
 window.addEventListener("storage", (e) => {
   if (e.key === "theme") {
+    finishPaletteTransition();
     theme.mode = e.newValue === "light" || e.newValue === "dark" ? e.newValue : "system";
     apply();
   } else if (e.key === "palette") {
@@ -130,5 +160,8 @@ export function cssHex(name: string, el: Element = document.documentElement) {
   return "#" + hex(r) + hex(g) + hex(b) + (a < 255 ? hex(a) : "");
 }
 
-media.addEventListener("change", apply);
+media.addEventListener("change", () => {
+  finishPaletteTransition();
+  apply();
+});
 apply();

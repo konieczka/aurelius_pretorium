@@ -29,7 +29,19 @@ export function resolvePalette(override: unknown, global: unknown): Palette {
 export const paletteName = (id: Palette): string => PALETTES.find((p) => p.id === id)?.name ?? id;
 
 /** How long a palette switch cross-fades for (theme.svelte.ts / palettes.css / Terminal keep to this). */
-export const PALETTE_TRANSITION_MS = 380;
+export const PALETTE_TRANSITION_MS = 200;
+
+/** Colour tokens animated together, including the window field and terminal surface. */
+export const PALETTE_COLOR_PROPERTIES = [
+  "--background", "--surface", "--foreground", "--card", "--popover",
+  "--primary", "--primary-foreground", "--secondary", "--muted", "--muted-foreground",
+  "--accent", "--accent-foreground", "--border", "--border-strong", "--input",
+  "--sidebar", "--sidebar-foreground", "--sidebar-accent", "--sidebar-border", "--scrollbar-thumb",
+  "--scrollbar-thumb-hover", "--chrome", "--chrome-edge", "--slab-head", "--float",
+  "--faint", "--hover", "--chip-on", "--hl", "--scrim",
+  "--fi-folder", "--gradient-from", "--gradient-to", "--glow-a", "--glow-b",
+  "--glow-c", "--gold", "--gold-ring", "--gold-soft",
+] as const;
 
 /** Should a change of the shown palette animate? Not the first palette a window shows (launch must not fade
  * in from the global default), not when the effective palette does not actually change, and not for a user
