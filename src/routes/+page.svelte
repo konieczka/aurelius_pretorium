@@ -22,6 +22,8 @@
   import Usage from "$lib/Usage.svelte";
   import { closeUsage, toggleUsage, usage, warmUsage } from "$lib/usageView.svelte";
   import Skills from "$lib/Skills.svelte";
+  import Mcp from "$lib/Mcp.svelte";
+  import { closeMcp, mcp, toggleMcp } from "$lib/mcpView.svelte";
   import { closeSkills, saveSkill, skills, toggleSkillMode, toggleSkills } from "$lib/skillsView.svelte";
   import AgentSettings from "$lib/AgentSettings.svelte";
   import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
@@ -104,6 +106,8 @@
       k === "w" && skills.open ? closeSkills :
       k === "s" && skills.open ? saveSkill :
       k === "e" && skills.open ? toggleSkillMode :
+      k === "m" && e.shiftKey ? toggleMcp :
+      k === "w" && mcp.open ? closeMcp :
       k === "a" && e.shiftKey ? toggleAgents :
       k === "w" && agents.open ? closeAgents :
       k === "j" && e.shiftKey ? toggleFleet :
@@ -193,9 +197,9 @@
         <div class="tree"><Fleet /></div>
       {/if}
     </aside>
-    <!-- The Usage, Skills, Agents and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
-    <main class:away={usage.open || skills.open || agents.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
-    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if agents.open}<AgentSettings />{:else if settings.open}<Settings />{/if}
+    <!-- The Usage, Skills, MCP, Agents and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open || skills.open || mcp.open || agents.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if mcp.open}<Mcp />{:else if agents.open}<AgentSettings />{:else if settings.open}<Settings />{/if}
     <StatusBar />
   </div>
   <QuickPick />

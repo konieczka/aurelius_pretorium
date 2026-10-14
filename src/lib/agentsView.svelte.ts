@@ -5,6 +5,7 @@ import type { Provider } from "./usageStats";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
 import { closeSettings } from "./settingsView.svelte";
+import { closeMcp } from "./mcpView.svelte";
 
 // The Agents view stands in for this window's panes while open, like Usage and Skills (they take turns). Per window,
 // not saved.
@@ -24,7 +25,7 @@ export const agents = $state({
 
 export function toggleAgents() {
   agents.open = !agents.open;
-  if (agents.open) (closeUsage(), closeSkills(), closeSettings());
+  if (agents.open) (closeUsage(), closeSkills(), closeSettings(), closeMcp());
 }
 export const closeAgents = () => (agents.open = false);
 

@@ -15,7 +15,7 @@ use crate::{err, Res};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Format {
+pub(crate) enum Format {
     Json,
     Jsonc,
     Toml,
@@ -89,7 +89,7 @@ fn spec(path: PathBuf, scope: Scope, label: &'static str) -> Spec {
 }
 
 /// `dir/name.jsonc` if it's there, else `dir/name.json` (what a new file is called).
-fn json_or_jsonc(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn json_or_jsonc(dir: &Path, name: &str) -> PathBuf {
     let c = dir.join(format!("{name}.jsonc"));
     if c.exists() { c } else { dir.join(format!("{name}.json")) }
 }
@@ -226,7 +226,7 @@ fn models(agent: Provider, home: &Path) -> Vec<Model> {
 }
 
 /// Parse a config file's text into JSON values. Blank text is an empty file: no settings.
-fn parse(text: &str, format: Format) -> Res<Value> {
+pub(crate) fn parse(text: &str, format: Format) -> Res<Value> {
     if text.trim().is_empty() {
         return Ok(Value::Object(Map::new()));
     }
@@ -304,12 +304,12 @@ fn to_cst(v: &Value) -> CstInputValue {
 /// One setting to change: `key` is the path of names down to it; no value removes it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Edit {
-    key: Vec<String>,
-    value: Option<Value>,
+    pub(crate) key: Vec<String>,
+    pub(crate) value: Option<Value>,
 }
 
 /// Apply `edits` to a TOML text, keeping everything else (comments, order, a replaced value's trailing comment).
-fn edit_toml(text: &str, edits: &[Edit]) -> Res<String> {
+pub(crate) fn edit_toml(text: &str, edits: &[Edit]) -> Res<String> {
     let mut doc = text.parse::<DocumentMut>().map_err(err)?;
     for e in edits {
         let Some((last, parents)) = e.key.split_last() else { continue };
@@ -321,7 +321,10 @@ fn edit_toml(text: &str, edits: &[Edit]) -> Res<String> {
                     missing = true; // nothing to remove
                     break;
                 }
-                table.insert(k, toml_edit::table());
+                // Implicit: a table holding only tables gets no header of its own ([a.b], not [a] then [a.b]).
+                let mut t = toml_edit::Table::new();
+                t.set_implicit(true);
+                table.insert(k, Item::Table(t));
             }
             table = table.get_mut(k).and_then(Item::as_table_like_mut).ok_or("Not a table")?;
         }
@@ -351,7 +354,7 @@ fn edit_toml(text: &str, edits: &[Edit]) -> Res<String> {
 }
 
 /// Apply `edits` to a JSON(C) text through its syntax tree, so comments and layout stay.
-fn edit_json(text: &str, edits: &[Edit]) -> Res<String> {
+pub(crate) fn edit_json(text: &str, edits: &[Edit]) -> Res<String> {
     let src = if text.trim().is_empty() { "{}\n" } else { text };
     let root = CstRootNode::parse(src, &ParseOptions::default()).map_err(err)?;
     for e in edits {
@@ -383,7 +386,7 @@ fn edit_json(text: &str, edits: &[Edit]) -> Res<String> {
     Ok(root.to_string())
 }
 
-fn read(path: &Path) -> Res<String> {
+pub(crate) fn read(path: &Path) -> Res<String> {
     match std::fs::read_to_string(path) {
         Ok(t) => Ok(t),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -393,7 +396,7 @@ fn read(path: &Path) -> Res<String> {
 
 /// Write `content` over `path` if it still holds `base` (an agent may have rewritten it since the page read it).
 /// Lands atomically through a temp file, through a symlink (dotfile managers) to its target, with the mode kept.
-fn write_checked(path: &Path, base: &str, content: &str) -> Res<()> {
+pub(crate) fn write_checked(path: &Path, base: &str, content: &str) -> Res<()> {
     if read(path)? != base {
         return Err(format!("{} changed on disk since it was loaded. Reloaded it; check it and save again.", path.display()));
     }

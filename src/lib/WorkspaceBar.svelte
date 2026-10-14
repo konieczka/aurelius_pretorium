@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
+  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Plug, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
   import { PALETTES, setMode, theme, type Mode, type Palette } from "./theme.svelte";
   import { paletteName } from "./palette";
   import { settings, toggleSettings } from "./settingsView.svelte";
@@ -7,6 +7,7 @@
   import { cues, toggleSoundCues } from "./soundCues.svelte";
   import { toggleUsage, usage } from "./usageView.svelte";
   import { skills, toggleSkills } from "./skillsView.svelte";
+  import { mcp, toggleMcp } from "./mcpView.svelte";
   import { agents, toggleAgents } from "./agentsView.svelte";
   import { activity, shells } from "./agents.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
@@ -218,6 +219,16 @@
     aria-pressed={skills.open}
   >
     <Brain size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view"
+    class:on={mcp.open}
+    onclick={toggleMcp}
+    title="MCP servers (⇧⌘M)"
+    aria-label="MCP servers"
+    aria-pressed={mcp.open}
+  >
+    <Plug size={14} strokeWidth={1.5} />
   </button>
   <button
     class="icon-btn view"
