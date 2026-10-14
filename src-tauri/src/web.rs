@@ -116,6 +116,80 @@ mod watch {
     pub fn stop(id: &str) {
         WATCHERS.with(|m| m.borrow_mut().remove(id));
     }
+
+    /// Main thread: show an error page when a load fails before the page commits (a dev server that's down, an
+    /// unknown host). wry's navigation delegate doesn't handle that, so WebKit would just keep the old page (or
+    /// nothing) and no event comes: reload looked like it did nothing. The method is added to wry's delegate class.
+    pub fn catch_failures(view: *mut c_void) {
+        use objc2::runtime::{Imp, Sel};
+        use objc2::sel;
+        let view = view as *mut AnyObject;
+        unsafe {
+            let delegate: *mut AnyObject = msg_send![view, navigationDelegate];
+            let Some(cls) = delegate.as_ref().map(|d| d.class()) else { return };
+            let imp: Imp = std::mem::transmute(failed as unsafe extern "C-unwind" fn(&AnyObject, Sel, &AnyObject, *mut AnyObject, &AnyObject));
+            // A no-op once added (all tabs share the class)
+            objc2::ffi::class_addMethod(cls as *const _ as *mut _, sel!(webView:didFailProvisionalNavigation:withError:), imp, c"v@:@@@".as_ptr());
+            // WebKit looks at which methods the delegate has when it's set: set it again so this view sees the new one
+            let _: () = msg_send![view, setNavigationDelegate: delegate];
+        }
+    }
+
+    unsafe extern "C-unwind" fn failed(_this: &AnyObject, _cmd: objc2::runtime::Sel, view: &AnyObject, _nav: *mut AnyObject, error: &AnyObject) {
+        let code: isize = msg_send![error, code];
+        let domain: Retained<NSString> = msg_send![error, domain];
+        // Not failures: another load or Stop cut it short, a link the tab won't open, a download
+        match (&*domain.to_string(), code) {
+            ("NSURLErrorDomain", -999) | ("WebKitErrorDomain", 102 | 204) => return,
+            _ => {}
+        }
+        let info: *mut AnyObject = msg_send![error, userInfo];
+        if info.is_null() {
+            return;
+        }
+        let url: Option<Retained<NSURL>> = msg_send![info, objectForKey: &*NSString::from_str("NSErrorFailingURLKey")];
+        let Some(url) = url else { return };
+        let Some(href) = url.absoluteString().map(|s| s.to_string()) else { return };
+        let message: Retained<NSString> = msg_send![error, localizedDescription];
+        let html = NSString::from_str(&super::error_page(&href, &message.to_string(), code == -1004));
+        // Safari's way: the page stands in for the address that failed, so it shows in the address bar and reload
+        // tries it again. Private, so with a plain HTML load (where reload just redraws this page) if it's ever gone.
+        let alternate = objc2::sel!(_loadAlternateHTMLString:baseURL:forUnreachableURL:);
+        let has: bool = msg_send![view, respondsToSelector: alternate];
+        if has {
+            let _: () = msg_send![view, _loadAlternateHTMLString: &*html, baseURL: &*url, forUnreachableURL: &*url];
+        } else {
+            let _: *mut AnyObject = msg_send![view, loadHTMLString: &*html, baseURL: &*url];
+        }
+    }
+}
+
+/// What a tab shows when its page couldn't be loaded. No script: Try Again is a link to the address.
+fn error_page(url: &str, message: &str, refused: bool) -> String {
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let parsed = Url::parse(url).ok();
+    let host = parsed.as_ref().and_then(|u| u.host_str().map(|h| match u.port() {
+        Some(p) => format!("{h}:{p}"),
+        None => h.to_string(),
+    }));
+    let host = host.unwrap_or_else(|| url.to_string());
+    let local = parsed.as_ref().and_then(|u| u.host_str()).is_some_and(|h| matches!(h, "localhost" | "127.0.0.1" | "0.0.0.0" | "[::1]") || h.ends_with(".localhost"));
+    let hint = if refused && local { "<p class=\"hint\">Nothing is answering on this port. Is the dev server running?</p>" } else { "" };
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><title>Can’t reach {host}</title><style>
+:root {{ color-scheme: light dark; }}
+body {{ margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; font: 13px -apple-system, system-ui, sans-serif; color: #6b6b6b; background: #fff; text-align: center; }}
+@media (prefers-color-scheme: dark) {{ body {{ color: #a0a0a0; background: #1c1c1c; }} h1 {{ color: #eee !important; }} a {{ border-color: #444 !important; color: #eee !important; }} }}
+main {{ max-width: 420px; padding: 24px; }}
+h1 {{ margin: 0 0 8px; font-size: 17px; font-weight: 600; color: #1a1a1a; }}
+p {{ margin: 0 0 6px; line-height: 1.5; word-break: break-word; }}
+.hint {{ margin-top: 10px; }}
+a {{ display: inline-block; margin-top: 18px; padding: 5px 14px; border: 1px solid #ccc; border-radius: 6px; color: #1a1a1a; text-decoration: none; }}
+</style></head><body><main><h1>Can’t reach {host}</h1><p>{message}</p>{hint}<a href="{href}">Try Again</a></main></body></html>"#,
+        host = esc(&host),
+        message = esc(message),
+        href = esc(url),
+    )
 }
 
 // The page's best icon for a 13px tab: an SVG, else the smallest at least 32px (sharp at 2x), else the biggest; ones
@@ -300,6 +374,7 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
         let views = app.clone();
         let _ = wv.with_webview(move |v| {
             views.state::<Views>().0.lock().unwrap().insert(v.inner() as usize, id.clone());
+            watch::catch_failures(v.inner());
             watch::start(views, id, v.inner());
         });
     }
@@ -449,7 +524,16 @@ pub fn focus_app(app: &AppHandle, window: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::icon_type;
+    use super::{error_page, icon_type};
+
+    #[test]
+    fn error_pages_name_the_address_safely() {
+        let page = error_page("http://localhost:5173/?q=<b>\"", "Could not connect to the server.", true);
+        assert!(page.contains("<title>Can’t reach localhost:5173</title>"));
+        assert!(page.contains(r#"href="http://localhost:5173/?q=&lt;b&gt;&quot;""#));
+        assert!(page.contains("dev server"));
+        assert!(!error_page("https://example.com/", "A server with the specified hostname could not be found.", false).contains("dev server"));
+    }
 
     #[test]
     fn icons_are_told_by_their_bytes() {
