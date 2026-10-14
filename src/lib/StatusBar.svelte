@@ -1,7 +1,8 @@
 <script lang="ts">
   import { ArrowDown, ArrowUp, CloudUpload, FolderGit2, GitBranch, LoaderCircle, RefreshCw, SquareTerminal } from "@lucide/svelte";
   import { popupMenu } from "./contextMenu";
-  import { branchName, git, noHead, publish, switchBranch, switchWorktree, sync } from "./GitPanel.svelte";
+  import { branchName, git, noHead, publish, sync } from "./GitPanel.svelte";
+  import { currentMenu, switchBranch, switchWorktree } from "./gitActions";
   import { app, closeTab, restoreTab } from "./state.svelte";
   import { activity, agentProvider } from "./agents.svelte";
   import ProviderIcon from "./ProviderIcon.svelte";
@@ -25,7 +26,7 @@
     <button onclick={switchWorktree} title="Worktree: {git.root} (click to switch or create)">
       <FolderGit2 size={13} strokeWidth={1.5} />{folder}
     </button>
-    <button class="glass" onclick={switchBranch} title="Branch{s.upstream ? ` (tracking ${s.upstream})` : ''} (click to switch or create)">
+    <button class="glass" onclick={switchBranch} oncontextmenu={(e) => (e.preventDefault(), currentMenu())} title="Branch{s.upstream ? ` (tracking ${s.upstream})` : ''} (click to switch or create, right-click for merge, rebase, stash…)">
       <GitBranch size={13} strokeWidth={1.5} />{branchName()}{#if s.files.length}*{/if}{#if git.op}<span class="op">{git.op} in progress</span>{/if}
     </button>
     {#if git.busy}

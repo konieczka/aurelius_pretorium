@@ -5,8 +5,8 @@ export type Tab =
   // agent: coding agent CLI running in it when last looked (see agents.svelte.ts); name: set by the user (Rename)
   | { id: string; kind: "term"; cwd: string; agent?: string; name?: string }
   | { id: string; kind: "file"; path: string; preview?: boolean; wrap?: boolean /* on unless false */ }
-  // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree)
-  | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string }
+  // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree), or base -> ref
+  | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string; base?: string }
   // url "" = a new tab waiting for an address; title = the page's, last seen
   | { id: string; kind: "web"; url: string; title?: string };
 export type Pane = { id: string; type: "pane"; tabs: Tab[]; active: number };

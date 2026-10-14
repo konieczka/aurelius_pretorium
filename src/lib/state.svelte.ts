@@ -199,12 +199,12 @@ export function openFile(path: string) {
 }
 
 /** Diff tab: staged = index vs HEAD, else working tree vs index; with `ref`, that commit's change. */
-export function openDiff(path: string, staged: boolean, orig?: string, ref?: string) {
+export function openDiff(path: string, staged: boolean, orig?: string, ref?: string, base?: string) {
   closeViews();
-  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "diff" && t.path === path && t.staged === staged && t.ref === ref);
+  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "diff" && t.path === path && t.staged === staged && t.ref === ref && t.base === base);
   if (existing) return activate(existing.id);
   const p = focusedPane();
-  p.tabs.push({ id: L.uid(), kind: "diff", path, staged, orig, ref });
+  p.tabs.push({ id: L.uid(), kind: "diff", path, staged, orig, ref, base });
   p.active = p.tabs.length - 1;
 }
 

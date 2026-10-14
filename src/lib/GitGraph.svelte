@@ -5,6 +5,7 @@
   import { git } from "./GitPanel.svelte";
   import { pick } from "./QuickPick.svelte";
   import { layout, LOG_FORMAT, parseLog, type Row } from "./graph";
+  import { branchMenu, commitMenu } from "./gitActions";
 
   let open = $state(true);
   let all = $state(false); // all branches vs current branch + upstream
@@ -117,6 +118,7 @@
         class:inc
         title={`${c.hash.slice(0, 7)} · ${c.author} · ${ago(c.time)} (${new Date(c.time * 1000).toLocaleString()})\n${c.subject}${bs.length ? "\n" + bs.map((b) => b.name).join(", ") : ""}`}
         onclick={() => showCommit(r)}
+        oncontextmenu={(e) => (e.preventDefault(), commitMenu(c, head))}
       >
         <svg width={x(lanes - 1) + 7} height={H} class="lanes">
           {#each r.segs as s, i (i)}
@@ -131,7 +133,8 @@
         </svg>
         <span class="subject">{c.subject}</span>
         {#each bs.slice(0, 2) as b (b.kind + b.name)}
-          <span class="badge {b.kind}">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span class="badge {b.kind}" oncontextmenu={(e) => b.kind !== "tag" && (e.preventDefault(), e.stopPropagation(), branchMenu(b.name, b.kind))}>
             {#if b.kind === "tag"}<Tag size={10} strokeWidth={1.75} />{:else if b.kind === "remote"}<Cloud size={10} strokeWidth={1.75} />{:else}<GitBranch size={10} strokeWidth={1.75} />{/if}{b.name}
           </span>
         {/each}

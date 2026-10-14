@@ -33,7 +33,7 @@
 
 <script lang="ts">
   import { ChevronDown, ChevronUp } from "@lucide/svelte";
-  let { path, staged, orig, ref }: { path: string; staged: boolean; orig?: string; ref?: string } = $props();
+  let { path, staged, orig, ref, base }: { path: string; staged: boolean; orig?: string; ref?: string; base?: string } = $props();
   let el: HTMLDivElement;
   let note = $state("");
   let scroll = -1; // kept across refetches; -1 = first open (jump to the first change)
@@ -48,9 +48,9 @@
     const rel = "./" + path.slice(dir.length + 1); // `:./x` resolves relative to cwd; `orig` is repo-root relative
     let dead = false;
     (async () => {
-      // Commit: ref^ -> ref. Staged: HEAD -> index. Unstaged: index -> working tree.
+      // Compare: base -> ref. Commit: ref^ -> ref. Staged: HEAD -> index. Unstaged: index -> working tree.
       const [a, b] = ref
-        ? await Promise.all([show(dir, `${ref}^:${orig ?? rel}`), show(dir, `${ref}:${rel}`)])
+        ? await Promise.all([show(dir, `${base ?? `${ref}^`}:${orig ?? rel}`), show(dir, `${ref}:${rel}`)])
         : staged
           ? await Promise.all([show(dir, `HEAD:${orig ?? rel}`), show(dir, `:${rel}`)])
           : await Promise.all([show(dir, `:${rel}`), invoke<string>("read_file", { path }).catch(() => "")]);

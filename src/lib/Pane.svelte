@@ -8,7 +8,7 @@
   export const tabLabel = (t: Tab) =>
     t.kind === "file" ? t.path.split("/").pop() || "Untitled" :
     t.kind === "web" ? t.title || (t.url ? hostOf(t.url) : "New Tab") :
-    t.kind === "diff" ? `${t.path.split("/").pop()} (${t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
+    t.kind === "diff" ? `${t.path.split("/").pop()} (${t.base && t.ref ? `${t.base.slice(0, 7)}..${t.ref.slice(0, 7)}` : t.ref ? t.ref.slice(0, 7) : t.staged ? "Index" : "Working Tree"})` :
     t.name || (t.agent && agentProvider[t.agent] ? providerName[agentProvider[t.agent]] : app.titles[t.id] || "Terminal");
 </script>
 
@@ -249,7 +249,7 @@
         {:else if tab.kind === "web"}
           <Browser {tab} />
         {:else if tab.kind === "diff"}
-          <Diff path={tab.path} staged={tab.staged} orig={tab.orig} ref={tab.ref} />
+          <Diff path={tab.path} staged={tab.staged} orig={tab.orig} ref={tab.ref} base={tab.base} />
         {:else if mediaKind(tab.path)}
           <Media path={tab.path} />
         {:else}

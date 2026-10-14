@@ -1,10 +1,11 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { ask, message } from "@tauri-apps/plugin-dialog";
-  import { app, openDiff, openFile, openWorkspace, refreshRepo, repoKey, runInTerminal } from "./state.svelte";
+  import { app, openDiff, openFile, refreshRepo, repoKey, runInTerminal } from "./state.svelte";
   import * as L from "./layout";
   import { pick, prompt } from "./QuickPick.svelte";
   import { changes, conflicts, emptyDeco, parseStatus, staged, treeDecorations, type GitFile, type GitStatus } from "./gitStatus";
+  import { conflictPrompt, pushRejected, rewrittenOnly } from "./gitOps";
 
   export const git = $state({
     root: "", // repo toplevel ("" = workspace is not in a repo)
@@ -12,14 +13,17 @@
     deco: emptyDeco(), // file tree colors / letters / muted ignored entries
     busy: "", // label of the running remote op (pull/push/sync)
     loaded: false,
-    op: "" as "" | "merge" | "rebase" | "cherry-pick", // operation in progress (possibly stopped on conflicts)
+    op: "" as "" | "merge" | "rebase" | "cherry-pick" | "revert", // operation in progress (possibly stopped on conflicts)
     opInfo: "",
+    draft: "", // the commit message being written
+    amend: null as string | null, // amending the last commit: its message (as it was put in the box)
   });
-  class Cancelled extends Error {}
+  /** Thrown by a step the user backed out of: `op` ends quietly. */
+  export class Cancelled extends Error {}
   let lastRaw = "";
 
-  const run = (args: string[]) => invoke<string>("git", { cwd: git.root || app.workspace, args });
-  const fail = (e: unknown) => message(String(e), { kind: "error" });
+  export const run = (args: string[]) => invoke<string>("git", { cwd: git.root || app.workspace, args });
+  export const fail = (e: unknown) => message(String(e), { kind: "error" });
   export const noHead = () => git.status?.oid === "(initial)";
   export const branchName = () => (git.status?.head === "(detached)" ? git.status.oid.slice(0, 7) : (git.status?.head ?? ""));
   export const changeCount = () => (git.status ? git.status.files.length : 0);
@@ -78,8 +82,8 @@
   /** Merge / rebase / cherry-pick in progress? Read from the (per-worktree) git dir; missing files = not in progress. */
   async function detectOp(gitDir: string): Promise<[typeof git.op, string]> {
     const read = (f: string) => invoke<string>("read_file", { path: `${gitDir}/${f}` }).then((t) => t.trim(), () => "");
-    const [merge, rebaseHead, onto, msgnum, end, pick] = await Promise.all(
-      ["MERGE_MSG", "rebase-merge/head-name", "rebase-merge/onto", "rebase-merge/msgnum", "rebase-merge/end", "CHERRY_PICK_HEAD"].map(read),
+    const [merge, rebaseHead, onto, msgnum, end, pick, revert] = await Promise.all(
+      ["MERGE_MSG", "rebase-merge/head-name", "rebase-merge/onto", "rebase-merge/msgnum", "rebase-merge/end", "CHERRY_PICK_HEAD", "REVERT_HEAD"].map(read),
     );
     const mergeHead = merge && (await read("MERGE_HEAD"));
     return rebaseHead
@@ -88,11 +92,13 @@
         ? ["merge", merge.split("\n")[0]]
         : pick
           ? ["cherry-pick", `Cherry-picking ${pick.slice(0, 7)}`]
-          : ["", ""];
+          : revert
+            ? ["revert", `Reverting ${revert.slice(0, 7)}`]
+            : ["", ""];
   }
 
   /** Run a git op, report errors, refresh. */
-  async function op(args: string[] | (() => Promise<unknown>), busy = "") {
+  export async function op(args: string[] | (() => Promise<unknown>), busy = "") {
     git.busy = busy;
     try {
       await (typeof args === "function" ? args() : run(args));
@@ -100,7 +106,9 @@
     } catch (e) {
       await refreshGit();
       // Stopped on conflicts: the banner + Merge Changes list explain it better than git's raw output.
-      if (!(e instanceof Cancelled) && !git.op) fail(e);
+      if (e instanceof Cancelled) return false;
+      if (!git.op) fail(e);
+      else if (git.status && conflicts(git.status).length) await onConflicts();
       return false;
     } finally {
       git.busy = "";
@@ -109,7 +117,23 @@
     }
   }
 
-  /** `git pull`; if the branches diverged and no pull strategy is configured, ask merge vs rebase. */
+  /** Stopped on conflicts: say so, and offer the ways out. */
+  async function onConflicts() {
+    const files = conflicts(git.status!).map((f) => f.path);
+    const v = await pick(`The ${git.op} stopped on conflicts in ${files.length === 1 ? files[0] : `${files.length} files`}`, [
+      { label: "Resolve them in the editor", detail: "accept current / incoming above each conflict, then Mark as Resolved", value: "edit" },
+      { label: `Resolve them with ${agent.cmd}`, detail: "opens a terminal; the agent resolves and stages, you review and continue", value: "agent" },
+      { label: `Abort the ${git.op}`, detail: "puts the branch back as it was before", value: "abort" },
+    ]);
+    if (v === "edit") openFile(`${git.root}/${files[0]}`);
+    else if (v === "agent") resolveWithAgent();
+    else if (v === "abort") await run([git.op, "--abort"]).catch(fail);
+  }
+
+  const forcePush = () => run(["push", "--force-with-lease"]);
+  const FORCE = "replaces the remote branch with yours; refused if someone pushed to it since your last fetch";
+
+  /** `git pull`; if the branches diverged and no pull strategy is configured, ask merge vs rebase (or force-push). */
   async function pullAsking() {
     try {
       await run(["pull"]);
@@ -120,17 +144,50 @@
         { label: "Rebase", detail: "git pull --rebase · replays your commits on top of upstream", value: "rebase" },
         { label: "Merge, and remember for this repository", detail: "git config pull.rebase false", value: "merge!" },
         { label: "Rebase, and remember for this repository", detail: "git config pull.rebase true", value: "rebase!" },
+        { label: "Force push mine instead (with lease)", detail: FORCE, value: "force" },
       ]);
       if (!v) throw new Cancelled();
+      if (v === "force") return void (await forcePush());
       const rebase = v.startsWith("rebase");
       if (v.endsWith("!")) await run(["config", "pull.rebase", String(rebase)]);
       await run(["pull", rebase ? "--rebase" : "--no-rebase"]);
     }
   }
 
+  /** `git push`; refused because the remote has commits ours doesn't (after a rebase or amend): pull, or force. */
+  async function pushAsking(args = ["push"]) {
+    try {
+      await run(args);
+    } catch (e) {
+      if (!pushRejected(e)) throw e;
+      const v = await pick("The remote branch has commits yours doesn't. Normal after a rebase or amend; else someone else pushed.", [
+        { label: "Pull, then push", detail: "brings their commits into yours first", value: "pull" },
+        { label: "Force push (with lease)", detail: FORCE, value: "force" },
+      ]);
+      if (!v) throw new Cancelled();
+      if (v === "force") return void (await forcePush());
+      await pullAsking();
+      await run(args);
+    }
+  }
+
+  /** Our branch was rebased (or the like): the upstream's commits are old copies of ours. Pulling them would bring
+   * the old history back in, so offer to force-push instead. */
+  async function rewritten() {
+    const s = git.status;
+    if (!s?.upstream || !s.ahead || !s.behind) return false;
+    if (!rewrittenOnly(await run(["cherry", "HEAD", "@{u}"]).catch(() => ""))) return false;
+    return ask(`Your branch was rewritten (rebased): the ${s.behind} commit(s) only on ${s.upstream} are older copies of yours. Force push to replace them (with lease)?`, {
+      okLabel: "Force push",
+      cancelLabel: "Pull them in",
+    });
+  }
+
   export const pull = () => op(pullAsking, "Pulling…");
-  export const push = () => op(["push"], "Pushing…");
-  export const sync = () => op(async () => (await pullAsking(), await run(["push"])), "Syncing…");
+  export const push = () => op(() => pushAsking(), "Pushing…");
+  export const pushForce = () => op(forcePush, "Pushing…");
+  export const fetch = () => op(["fetch", "--all", "--prune"], "Fetching…");
+  export const sync = () => op(async () => ((await rewritten()) ? await forcePush() : (await pullAsking(), await pushAsking())), "Syncing…");
   /** Stage a resolved conflict file (absolute path). */
   export const markResolved = (path: string) => op(["add", "--", path]);
 
@@ -142,7 +199,7 @@
   }
 
   // Agent hand-off: runs `<agent command> '<prompt>'` in a new terminal tab.
-  const agent = $state({ cmd: "claude" });
+  export const agent = $state({ cmd: "claude" });
   try {
     agent.cmd = localStorage.getItem("agentCommand") || "claude";
   } catch {}
@@ -155,17 +212,13 @@
     } catch {}
   }
   const shq = (t: string) => `'${t.replace(/'/g, `'\\''`)}'`;
+  /** Start the agent in a new terminal at `cwd` with `prompt`. */
+  export const askAgent = (cwd: string, prompt: string) => runInTerminal(cwd, `${agent.cmd} ${shq(prompt)}`);
   function resolveWithAgent() {
     const files = git.status ? conflicts(git.status).map((f) => f.path) : [];
-    const prompt =
-      `A git ${git.op || "merge"} is in progress in this repository (${git.opInfo}) and stopped on conflicts in: ${files.join(", ")}. ` +
-      `Resolve every conflict: work out what each side intended` +
-      (git.op === "rebase" ? ` (during a rebase, HEAD/"current" is the upstream and the incoming side is the commit being replayed)` : "") +
-      `, combine them so both intents are kept, and remove all conflict markers. If it's quick, check that the project still builds and its tests pass. ` +
-      `Then stage each resolved file with git add. Do NOT commit and do NOT run --continue: I'll review and continue myself.`;
-    runInTerminal(git.root, `${agent.cmd} ${shq(prompt)}`);
+    askAgent(git.root, conflictPrompt(git.op, git.opInfo, files));
   }
-  export const publish = () => op(["push", "-u", "origin", "HEAD"], "Publishing…");
+  export const publish = () => op(() => pushAsking(["push", "-u", "origin", "HEAD"]), "Publishing…");
 
   const stage = (paths: string[]) => op(["add", "-A", "--", ...paths]);
   const unstage = (paths: string[]) =>
@@ -183,9 +236,18 @@
     });
   }
 
-  async function commit(msg: string) {
+  /** HEAD is already on a remote branch: rewriting it means a force push. */
+  export const pushed = () => run(["branch", "-r", "--contains", "HEAD"]).then((o) => !!o.trim(), () => false);
+
+  /** Amend: message unchanged (`keep`) keeps the whole message, body included; the staged changes go in either way. */
+  async function commit(msg: string, amend = false, keep = "") {
     const s = git.status;
     if (!s || !msg.trim()) return false;
+    if (amend) {
+      if ((await pushed()) && !(await ask("This commit is already pushed. Amending rewrites it, so you'll need to force push. Amend anyway?", { kind: "warning" })))
+        return false;
+      return op(["commit", "--amend", ...(msg === keep ? ["--no-edit"] : ["-m", msg])]);
+    }
     if (!staged(s).length) {
       if (!changes(s).length) return void message("There are no changes to commit.");
       if (!(await ask("There are no staged changes. Stage all your changes and commit them directly?"))) return false;
@@ -196,81 +258,6 @@
     });
   }
 
-  export async function switchBranch() {
-    const fmt = "%(refname)%09%(objectname:short)%09%(worktreepath)%09%(contents:subject)";
-    const refs = (await run(["for-each-ref", "--sort=-committerdate", `--format=${fmt}`, "refs/heads", "refs/remotes"]).catch(() => ""))
-      .split("\n")
-      .filter((l) => l && !l.split("\t")[0].endsWith("/HEAD"))
-      .map((l) => {
-        const [ref, sha, wt, ...subject] = l.split("\t");
-        return { ref, name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote: ref.startsWith("refs/remotes/"), sha, wt, subject: subject.join("\t") };
-      });
-    // A branch can be checked out in one worktree only: `git switch` to one checked out in another fails, so open that one.
-    const elsewhere = new Map(refs.filter((r) => !r.remote && r.wt && r.wt !== git.root).map((r) => [r.name, r.wt]));
-    const locals = new Set(refs.filter((r) => !r.remote).map((r) => r.name));
-    const v = await pick("Select a branch to switch to", [
-      { label: "+ Create new branch…", value: "\0new" },
-      ...refs.map((r) => ({
-        label: r.name,
-        detail: `${r.sha} · ${r.subject}`,
-        hint: r.name === git.status?.head ? "current" : elsewhere.has(r.name) ? `in worktree ${base(elsewhere.get(r.name)!)}` : r.remote ? "remote" : "",
-        value: r.ref,
-      })),
-    ]);
-    if (!v) return;
-    if (v === "\0new") {
-      const name = await prompt(`New branch name (from ${branchName()})`);
-      if (name) await op(["switch", "-c", name]);
-      return;
-    }
-    const r = refs.find((x) => x.ref === v)!;
-    // Remote branch: switch to its local counterpart, creating a tracking branch if needed.
-    const local = r.remote ? r.name.slice(r.name.indexOf("/") + 1) : r.name;
-    const wt = elsewhere.get(local);
-    if (wt) {
-      if (await ask(`"${local}" is checked out in the worktree at ${wt}. Open that worktree?`)) goTo(wt);
-      return;
-    }
-    await op(!r.remote || locals.has(local) ? ["switch", local] : ["switch", "-c", local, "--track", r.name]);
-  }
-
-  const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
-
-  /** Each worktree is its own workspace (own layout); the one we leave keeps running in the background. */
-  const goTo = (path: string) => openWorkspace(path);
-
-  export async function switchWorktree() {
-    const wts = (await run(["worktree", "list", "--porcelain"]).catch(() => ""))
-      .trim()
-      .split("\n\n")
-      .filter(Boolean)
-      .map((b) => {
-        const lines = b.split("\n");
-        const branch = lines.find((l) => l.startsWith("branch "))?.slice("branch refs/heads/".length);
-        return { path: lines[0].slice("worktree ".length), branch: branch ?? (lines.includes("bare") ? "bare" : "detached") };
-      });
-    const v = await pick("Select a worktree to open", [
-      { label: "+ Create new worktree…", value: "\0new" },
-      ...wts.map((w, i) => ({
-        label: base(w.path),
-        detail: `${w.branch} · ${w.path}`,
-        hint: w.path === git.root ? "current" : i === 0 ? "main" : "",
-        value: w.path,
-      })),
-    ]);
-    if (!v || v === git.root) return;
-    if (v !== "\0new") return goTo(v);
-    const name = await prompt("Branch for the new worktree (existing or new)");
-    if (!name || !wts.length) return;
-    // Sibling of the main worktree: <main>-<branch>
-    const main = wts[0].path;
-    const path = `${main}-${name.replace(/[^\w.-]+/g, "-")}`;
-    const exists = await run(["rev-parse", "--verify", "--quiet", `refs/heads/${name}`]).then(() => true, () => false);
-    if (await op(exists ? ["worktree", "add", path, name] : ["worktree", "add", "-b", name, path])) {
-      if (await ask(`Worktree created at ${path}. Open it now?`)) goTo(path);
-    }
-  }
-
   function open(f: GitFile, isStaged: boolean) {
     const abs = `${git.root}/${f.path}`;
     if (f.kind === "conflict") openFile(abs); // conflict markers are best seen in the editor
@@ -279,11 +266,12 @@
 </script>
 
 <script lang="ts">
-  import { Bot, ChevronRight, FileText, GitMerge, Minus, Pencil, Plus, Undo2 } from "@lucide/svelte";
+  import { Bot, ChevronRight, Ellipsis, FileText, GitMerge, Minus, Pencil, Plus, Undo2, X } from "@lucide/svelte";
   import { letter } from "./gitStatus";
   import GitGraph from "./GitGraph.svelte";
+  import GitStashes from "./GitStashes.svelte";
+  import { currentMenu } from "./gitActions";
 
-  let msg = $state("");
   let closed = $state<Record<string, boolean>>({});
   const s = $derived(git.status);
   const groups = $derived(
@@ -299,8 +287,9 @@
   const name = (p: string) => p.slice(p.lastIndexOf("/") + 1);
   const dir = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
   async function doCommit() {
-    if (await commit(msg)) msg = "";
+    if (await commit(git.draft, git.amend !== null, git.amend ?? "")) (git.draft = ""), (git.amend = null);
   }
+  const cancelAmend = () => ((git.draft = ""), (git.amend = null));
 </script>
 
 {#if !git.loaded}
@@ -333,13 +322,20 @@
     {/if}
     <div class="commit">
       <input
-        bind:value={msg}
-        placeholder="Commit message"
-        title={`Enter to commit on "${branchName()}"`}
+        bind:value={git.draft}
+        placeholder={git.amend !== null ? "Message for the amended commit" : "Commit message"}
+        title={git.amend !== null ? "Enter to amend the last commit (staged changes go in too)" : `Enter to commit on "${branchName()}"`}
         onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), doCommit())}
       />
-      <button class="primary" disabled={!msg.trim() || !!git.busy} onclick={doCommit} title="Commit">Commit</button>
+      <button class="primary" disabled={!git.draft.trim() || !!git.busy} onclick={doCommit}>{git.amend !== null ? "Amend" : "Commit"}</button>
+      <button class="icon-btn more" onclick={currentMenu} title="More actions: merge, rebase, finish branch, stash…" aria-label="More git actions"><Ellipsis size={15} strokeWidth={1.5} /></button>
     </div>
+    {#if git.amend !== null}
+      <div class="amending">
+        <span>Amending the last commit</span>
+        <button class="icon-btn" onclick={cancelAmend} title="Stop amending" aria-label="Stop amending"><X size={13} strokeWidth={1.5} /></button>
+      </div>
+    {/if}
 
     {#if !groups.length}
       <div class="clean">No changes</div>
@@ -389,6 +385,7 @@
         {/if}
       </div>
     {/each}
+    <GitStashes />
     <GitGraph />
   </div>
 {/if}
@@ -490,6 +487,17 @@
     font-size: 13px;
     outline: none;
     transition: border-color var(--dur-quick) var(--ease-standard);
+  }
+  .more {
+    align-self: center;
+  }
+  .amending {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2px 0 4px;
+    color: var(--gold);
+    font-size: 12px;
   }
   .commit input:focus {
     border-color: var(--gold-ring);
