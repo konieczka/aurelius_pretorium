@@ -33,3 +33,11 @@ test("antigravity is asked in words, quoted for the shell", () => {
   expect(command).toContain("aren'\\''t"); // the shell's way to put ' in a quoted string
   expect(steps).toEqual([]);
 });
+
+test("muse is asked in words as its opening prompt", () => {
+  const { command, steps } = reviewLaunch("muse", "/h/.local/bin/muse", false);
+  expect(command).toStartWith("/h/.local/bin/muse 'Review the changes");
+  expect(command).toEndWith("with file and line.'");
+  expect(steps).toEqual([]);
+  expect(reviewLaunch("muse", "muse", true).command).toEndWith("Then fix them all.'");
+});

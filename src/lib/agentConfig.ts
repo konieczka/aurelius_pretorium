@@ -115,6 +115,21 @@ export const FIELDS: Record<Provider, Field[]> = {
     { key: k("permission.edit"), label: "File edits", kind: "select", help: "Edits without asking, after asking, or never.", options: opts("ask", "allow", "deny") },
     { key: k("permission.bash"), label: "Shell commands", kind: "select", help: "Commands without asking, after asking, or never.", options: opts("ask", "allow", "deny") },
   ],
+  // Keys checked with `muse exec -c key=value`, which refuses unknown ones. Approvals and permission profiles are set
+  // per run (--approval-mode) or in the file.
+  muse: [
+    { key: k("model"), label: "Model", kind: "text", help: "Model for new sessions.", suggest: ["muse-spark-1.3", "muse-spark-1.2"] },
+    {
+      key: k("reasoning_effort"),
+      label: "Reasoning effort",
+      kind: "select",
+      help: "How much the model reasons (high when not set). Ultra only where your plan offers it.",
+      options: opts("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"),
+    },
+    { key: k("tui.terminal_background"), label: "Theme", kind: "select", help: "Colors for a dark or light terminal, or detected.", options: opts("auto", "dark", "light") },
+    { key: k("session_retention_days"), label: "Keep sessions", kind: "number", help: "Days to keep session logs (forever when not set).", placeholder: "forever" },
+    { key: k("telemetry.enabled"), label: "Telemetry", kind: "bool", help: "Send usage telemetry to Meta." },
+  ],
 };
 
 export const scopeOrder: Scope[] = ["global", "project", "local"];

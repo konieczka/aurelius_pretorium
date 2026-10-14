@@ -114,7 +114,7 @@ const folders: Record<string, FolderIcon> = {
   images: f(FolderHeart, "violet"), img: f(FolderHeart, "violet"), icons: f(FolderHeart, "violet"), fonts: f(FolderHeart, "red"),
   docs: f(FolderPen, "sky"), doc: f(FolderPen, "sky"),
   config: f(FolderCog, "gray"), ".config": f(FolderCog, "gray"), ".vscode": f(FolderCog, "blue"),
-  ".idea": f(FolderCog, "gray"), ".claude": f(FolderCog, "gold"), capabilities: f(FolderKey, "amber"),
+  ".idea": f(FolderCog, "gray"), ".claude": f(FolderCog, "gold"), ".muse": f(FolderCog, "violet"), capabilities: f(FolderKey, "amber"),
   scripts: f(FolderInput, "green"), bin: f(FolderInput, "green"), tools: f(FolderInput, "gray"),
   ".git": f(FolderGit2, "rust"), ".github": f(FolderGit2, "gray"), ".husky": f(FolderGit2, "gray"),
   keys: f(FolderKey, "amber"), secrets: f(FolderKey, "amber"), certs: f(FolderKey, "amber"),

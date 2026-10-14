@@ -1,6 +1,7 @@
 // The Fleet sidebar's Review button: how each agent is started to review the folder's branch, and (Auto-fix) made to
 // fix what it found. Claude and Grok run their review command given as the opening prompt; Codex and OpenCode only
-// when it's typed in (as an opening prompt it's sent as plain text); Antigravity has none, so it's asked in words.
+// when it's typed in (as an opening prompt it's sent as plain text); Antigravity and Muse Code have none, so they're
+// asked in words.
 import type { Step } from "./agents.svelte";
 import type { Provider } from "./usageStats";
 
@@ -25,5 +26,7 @@ export function reviewLaunch(agent: Provider, command: string, fix: boolean): { 
       return { command, steps: [{ when: "ready", keys: ["/review", "\r", ` Review ${SCOPE}.`, "\r"] }, ...fixAfter] };
     case "antigravity":
       return { command: `${command} -i ${quote(fix ? `${ASK} Then fix them all.` : ASK)}`, steps: [] };
+    case "muse": // a prompt after its options starts an interactive session with it
+      return { command: `${command} ${quote(fix ? `${ASK} Then fix them all.` : ASK)}`, steps: [] };
   }
 }

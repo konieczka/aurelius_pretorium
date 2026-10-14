@@ -54,3 +54,8 @@ test("secret values are found in JSON and TOML lines", () => {
   expect(secretRanges(`token_header = ""`)).toEqual([]);
   expect(secretRanges(`effortLevel = "high"`)).toEqual([]);
 });
+
+test("muse's form only edits keys its CLI accepts", () => {
+  // Checked with `muse exec -c key=value`: unknown keys refuse the run, and so would its settings file.
+  expect(FIELDS.muse.map((f) => f.key.join("."))).toEqual(["model", "reasoning_effort", "tui.terminal_background", "session_retention_days", "telemetry.enabled"]);
+});

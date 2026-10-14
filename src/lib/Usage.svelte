@@ -5,7 +5,7 @@
   import { closeUsage, loadLimits, loadStats, poll, usage } from "./usageView.svelte";
   import { PROVIDERS, fmtLeft, fmtShare, fmtTokens, pace, providerName, summarize, type Limit, type Provider } from "./usageStats";
 
-  const short: Record<Provider, string> = { claude: "Claude", codex: "Codex", grok: "Grok", antigravity: "Antigravity", opencode: "OpenCode" };
+  const short: Record<Provider, string> = { claude: "Claude", codex: "Codex", grok: "Grok", antigravity: "Antigravity", opencode: "OpenCode", muse: "Muse" };
 
   $effect(poll);
 
@@ -82,7 +82,7 @@
       </div>
       {#if usage.limits}
         <p class="note">
-          % of each limit used, and when it resets.{#if limitGroups.some((g) => g.p === "codex" && g.limits.length)}{" "}Codex limits are as of its last response.{/if}{#if shown.includes("opencode")}{" "}OpenCode doesn't report its limits.{/if}
+          % of each limit used, and when it resets.{#if limitGroups.some((g) => g.p === "codex" && g.limits.length)}{" "}Codex limits are as of its last response.{/if}{#if shown.includes("opencode")}{" "}OpenCode doesn't report its limits.{/if}{#if shown.includes("muse")}{" "}Muse Code doesn't report its limits.{/if}
         </p>
       {/if}
     </section>
@@ -101,7 +101,7 @@
       {:else if !s}
         <p class="muted">Reading session logs…</p>
       {:else if !s.sessions}
-        <p class="muted">No Claude Code, Codex or Grok Build sessions in the last {usage.days} days.</p>
+        <p class="muted">No Claude Code, Codex, Grok Build or Muse Code sessions in the last {usage.days} days.</p>
       {:else}
         <div class="overview">
           <div class="legend">

@@ -1,12 +1,12 @@
 //! Agent skills: folders holding a SKILL.md (YAML frontmatter with `name` and `description`, then instructions).
-//! The agents share folders (Grok and OpenCode also read Claude's, Codex and OpenCode read `.agents/skills`), and
-//! installers symlink one copy into several of them, so skills are listed by where they live, merged by real path,
-//! each with the agents that read its folders.
+//! The agents share folders (Grok, OpenCode and Muse also read Claude's; Codex, OpenCode and Muse read
+//! `.agents/skills`), and installers symlink one copy into several of them, so skills are listed by where they live,
+//! merged by real path, each with the agents that read its folders.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
-use crate::usage::Provider::{self, Antigravity, Claude, Codex, Grok, OpenCode};
+use crate::usage::Provider::{self, Antigravity, Claude, Codex, Grok, Muse, OpenCode};
 use crate::{err, Res};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -37,14 +37,16 @@ fn loc(dir: PathBuf, scope: Scope, agents: &[Provider]) -> Loc {
 fn locations(home: &Path, project: &Path) -> Vec<Loc> {
     use Scope::*;
     let mut out = vec![
-        loc(project.join(".claude/skills"), Project, &[Claude, Grok, OpenCode]),
-        loc(project.join(".agents/skills"), Project, &[Codex, Antigravity, OpenCode]),
+        loc(project.join(".claude/skills"), Project, &[Claude, Grok, OpenCode, Muse]),
+        loc(project.join(".agents/skills"), Project, &[Codex, Antigravity, OpenCode, Muse]),
+        loc(project.join(".codex/skills"), Project, &[Muse]),
         loc(project.join(".grok/skills"), Project, &[Grok]),
         loc(project.join(".opencode/skills"), Project, &[OpenCode]),
         loc(project.join(".opencode/skill"), Project, &[OpenCode]),
-        loc(home.join(".claude/skills"), Global, &[Claude, Grok, OpenCode]),
-        loc(home.join(".agents/skills"), Global, &[Codex, OpenCode]),
-        loc(home.join(".codex/skills"), Global, &[Codex]),
+        loc(home.join(".claude/skills"), Global, &[Claude, Grok, OpenCode, Muse]),
+        loc(home.join(".agents/skills"), Global, &[Codex, OpenCode, Muse]),
+        loc(home.join(".codex/skills"), Global, &[Codex, Muse]),
+        loc(home.join(".config/muse/skills"), Global, &[Muse]),
         loc(home.join(".gemini/config/skills"), Global, &[Antigravity]),
         loc(home.join(".grok/skills"), Global, &[Grok]),
         loc(home.join(".config/opencode/skills"), Global, &[OpenCode]),
@@ -62,9 +64,9 @@ fn locations(home: &Path, project: &Path) -> Vec<Loc> {
 /// Where "all agents" puts a new skill, and where it links it so the rest see it too.
 fn shared(home: &Path, project: &Path, scope: Scope) -> Option<(PathBuf, Vec<PathBuf>)> {
     match scope {
-        // .agents: Codex, Antigravity, OpenCode; .claude: Claude, Grok.
+        // .agents: Codex, Antigravity, OpenCode, Muse; .claude: Claude, Grok.
         Scope::Project => Some((project.join(".agents/skills"), vec![project.join(".claude/skills")])),
-        // .agents: Codex, OpenCode; .claude: Claude, Grok; .gemini: Antigravity.
+        // .agents: Codex, OpenCode, Muse; .claude: Claude, Grok; .gemini: Antigravity.
         Scope::Global => Some((home.join(".agents/skills"), vec![home.join(".claude/skills"), home.join(".gemini/config/skills")])),
         Scope::Managed => None,
     }
@@ -514,7 +516,7 @@ mod tests {
 
         let w = by("wrangler");
         assert_eq!(w.scope, Scope::Global);
-        assert_eq!(w.agents, [Claude, Codex, Grok, OpenCode]);
+        assert_eq!(w.agents, [Claude, Codex, Grok, OpenCode, Muse]);
         assert_eq!(w.places.len(), 2);
         assert!(w.places.iter().any(|p| p.link && p.path.ends_with(".claude/skills/wrangler")));
         assert_eq!(w.files, ["scripts"]);
@@ -544,14 +546,14 @@ mod tests {
         let r = scan(&home, &proj);
         let k = &r.skills[0];
         assert_eq!(r.skills.len(), 1);
-        assert_eq!(k.agents, [Claude, Codex, Grok, Antigravity, OpenCode]);
+        assert_eq!(k.agents, [Claude, Codex, Grok, Antigravity, OpenCode, Muse]);
         assert_eq!(std::fs::read_link(home.join(".claude/skills/git-commit")).unwrap(), PathBuf::from("../../.agents/skills/git-commit"));
         assert!(create(&home, &proj, Scope::Global, None, "git-commit", "").unwrap_err().contains("already exists"));
 
         // Project, all agents: everyone sees it through .agents + .claude.
         create(&home, &proj, Scope::Project, None, "deploy", "Deploys").unwrap();
         let d = scan(&home, &proj).skills.into_iter().find(|k| k.name == "deploy").unwrap();
-        assert_eq!((d.scope, d.agents.len()), (Scope::Project, 5));
+        assert_eq!((d.scope, d.agents.len()), (Scope::Project, 6));
 
         // One folder only, which must be a known one.
         create(&home, &proj, Scope::Project, Some(&proj.join(".grok/skills")), "lint", "Lints").unwrap();

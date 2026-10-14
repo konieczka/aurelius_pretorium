@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, TableLike};
 
-use crate::usage::Provider::{self, Antigravity, Claude, Codex, Grok, OpenCode};
+use crate::usage::Provider::{self, Antigravity, Claude, Codex, Grok, Muse, OpenCode};
 use crate::{err, Res};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ fn json_or_jsonc(dir: &Path, name: &str) -> PathBuf {
 }
 
 // ponytail: paths as of each CLI's current release (Oct 2026). Env overrides (CODEX_HOME, GROK_HOME, OPENCODE_CONFIG,
-// GROK_CONFIG overlays) and Windows/Linux managed paths aren't followed.
+// GROK_CONFIG overlays, XDG_CONFIG_HOME), Muse's managed_hooks_path and Windows/Linux managed paths aren't followed.
 /// The files each agent reads, highest precedence first. Managed files only when present.
 fn specs(agent: Provider, home: &Path, project: &Path) -> Vec<Spec> {
     use Scope::*;
@@ -142,11 +142,13 @@ fn specs(agent: Provider, home: &Path, project: &Path) -> Vec<Spec> {
             out.push(Spec { format: Format::Jsonc, ..spec(json_or_jsonc(project, "opencode"), Project, "Project") });
             out.push(Spec { format: Format::Jsonc, ..spec(json_or_jsonc(&home.join(".config/opencode"), "opencode"), Global, "Global") });
         }
+        // Muse has no project settings: a project only adds hooks (.muse/hooks.json) and MCP servers (.mcp.json).
+        Muse => out.push(spec(home.join(".config/muse/settings.json"), Global, "Global")),
     }
     out
 }
 
-const AGENTS: [Provider; 5] = [Claude, Codex, Grok, Antigravity, OpenCode];
+const AGENTS: [Provider; 6] = [Claude, Codex, Grok, Antigravity, OpenCode, Muse];
 
 fn command(agent: Provider) -> &'static str {
     match agent {
@@ -155,6 +157,7 @@ fn command(agent: Provider) -> &'static str {
         Grok => "grok",
         Antigravity => "agy",
         OpenCode => "opencode",
+        Muse => "muse",
     }
 }
 
@@ -171,6 +174,7 @@ fn launch(agent: Provider, home: &Path) -> Option<String> {
     let own = match agent {
         Grok => home.join(".grok/bin/grok"),
         OpenCode => home.join(".opencode/bin/opencode"),
+        Muse => home.join(".local/bin/muse"),
         _ => return None,
     };
     own.exists().then(|| own.to_string_lossy().into_owned())
@@ -298,7 +302,7 @@ fn to_cst(v: &Value) -> CstInputValue {
 }
 
 /// One setting to change: `key` is the path of names down to it; no value removes it.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Edit {
     key: Vec<String>,
     value: Option<Value>,
@@ -436,27 +440,28 @@ fn scan(home: &Path, project: &Path) -> Scan {
     Scan { agents, home: home.to_string_lossy().into_owned() }
 }
 
-/// The format of `path` if it's a file some agent reads that may be written here: no writing anywhere else.
-fn writable(home: &Path, project: &Path, path: &str) -> Res<Format> {
+/// The agent and format of `path` if it's a file some agent reads that may be written here: no writing anywhere else.
+fn writable(home: &Path, project: &Path, path: &str) -> Res<(Provider, Format)> {
     AGENTS
         .iter()
-        .flat_map(|&a| specs(a, home, project))
-        .find(|s| s.scope != Scope::Managed && s.path == Path::new(path))
-        .map(|s| s.format)
+        .find_map(|&a| specs(a, home, project).into_iter().find(|s| s.scope != Scope::Managed && s.path == Path::new(path)).map(|s| (a, s.format)))
         .ok_or_else(|| format!("{path} isn't an agent settings file"))
 }
 
 fn save(home: &Path, project: &Path, path: &str, base: &str, content: &str) -> Res<()> {
-    let format = writable(home, project, path)?;
+    let (_, format) = writable(home, project, path)?;
     parse(content, format).map_err(|e| format!("Not saved: {e}"))?;
     write_checked(Path::new(path), base, content)
 }
 
 fn set(home: &Path, project: &Path, path: &str, base: &str, edits: &[Edit]) -> Res<String> {
-    let format = writable(home, project, path)?;
+    let (agent, format) = writable(home, project, path)?;
+    // Muse won't start on a settings file without its schema version, so a new one gets it first.
+    let seed = (agent == Muse && base.trim().is_empty()).then(|| Edit { key: vec!["schema_version".into()], value: Some(1.into()) });
+    let edits: Vec<Edit> = seed.into_iter().chain(edits.iter().cloned()).collect();
     let text = match format {
-        Format::Toml => edit_toml(base, edits)?,
-        Format::Json | Format::Jsonc => edit_json(base, edits)?,
+        Format::Toml => edit_toml(base, &edits)?,
+        Format::Json | Format::Jsonc => edit_json(base, &edits)?,
     };
     parse(&text, format)?;
     write_checked(Path::new(path), base, &text)?;
@@ -589,5 +594,17 @@ mod tests {
         let scopes: Vec<_> = s.iter().filter(|s| s.scope != Scope::Managed).map(|s| s.scope).collect();
         assert_eq!(scopes, [Scope::Local, Scope::Project, Scope::Global]);
         assert_eq!(specs(OpenCode, Path::new("/h"), Path::new("/p"))[1].path, Path::new("/h/.config/opencode/opencode.json"));
+    }
+
+    #[test]
+    fn new_muse_settings_start_with_their_schema_version() {
+        let home = tmp("muse");
+        let project = tmp("muse-project");
+        let p = home.join(".config/muse/settings.json");
+        let text = set(&home, &project, p.to_str().unwrap(), "", &[edit("model", Some(json!("muse-spark-1.3")))]).unwrap();
+        assert_eq!(parse(&text, Format::Json).unwrap(), json!({ "schema_version": 1, "model": "muse-spark-1.3" }));
+        // An existing file is left as it is apart from the edit.
+        let text = set(&home, &project, p.to_str().unwrap(), &text, &[edit("schema_version", None)]).unwrap();
+        assert_eq!(parse(&text, Format::Json).unwrap(), json!({ "model": "muse-spark-1.3" }));
     }
 }

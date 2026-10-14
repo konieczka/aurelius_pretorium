@@ -1,8 +1,8 @@
 // Usage view math: rows from `usage_stats` (hourly, per session and model) -> what the page shows.
 
-export type Provider = "claude" | "codex" | "grok" | "antigravity" | "opencode";
-export const PROVIDERS: Provider[] = ["claude", "codex", "grok", "antigravity", "opencode"]; // fixed order: it also fixes their colors
-export const providerName: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok Build", antigravity: "Antigravity", opencode: "OpenCode" };
+export type Provider = "claude" | "codex" | "grok" | "antigravity" | "opencode" | "muse";
+export const PROVIDERS: Provider[] = ["claude", "codex", "grok", "antigravity", "opencode", "muse"]; // fixed order: it also fixes their colors
+export const providerName: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok Build", antigravity: "Antigravity", opencode: "OpenCode", muse: "Muse Code" };
 
 export type Row = { provider: Provider; model: string; session: string; hour: number; uncached: number; cached: number; output: number; total: number };
 export type Limit = { provider: Provider; label: string; used: number; resetsAt: number | null; windowMinutes: number | null; note: string | null };
@@ -10,7 +10,7 @@ export type Limit = { provider: Provider; label: string; used: number; resetsAt:
 export type Totals = { processed: number; cached: number; uncached: number; output: number };
 export type Day = { start: number; total: number; sessions: number; by: Record<Provider, number> };
 
-const zero = (): Record<Provider, number> => ({ claude: 0, codex: 0, grok: 0, antigravity: 0, opencode: 0 });
+const zero = (): Record<Provider, number> => ({ claude: 0, codex: 0, grok: 0, antigravity: 0, opencode: 0, muse: 0 });
 
 /** Local midnight `days - 1` days before `now`'s day: the range is today plus the days before it. */
 export function rangeStart(days: number, now = Date.now()) {

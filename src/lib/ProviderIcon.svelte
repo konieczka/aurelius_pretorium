@@ -24,6 +24,9 @@
   {:else if provider === "antigravity"}
     <!-- Antigravity's arch -->
     <path d="M2.5 13.5 C4.5 13.5 5.5 2.5 8 2.5 S11.5 13.5 13.5 13.5" stroke-width="1.6" />
+  {:else if provider === "muse"}
+    <!-- Muse Code's M, as one stroke -->
+    <path d="M2.5 13 V3.5 L8 10 L13.5 3.5 V13" stroke-width="1.5" stroke-linejoin="round" />
   {:else}
     <!-- OpenCode's block -->
     <rect x="3" y="2.5" width="10" height="11" rx="1" stroke-width="1.4" />

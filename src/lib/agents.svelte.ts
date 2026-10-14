@@ -9,7 +9,7 @@ import { turnDone, type Turn } from "./agentTurn";
 // Its `cwd` likewise follows the shell's working directory, or its agent's (which may move into another worktree).
 
 /** Agent command (what the backend reports) -> its provider, for the tab's name and icon. */
-export const agentProvider: Record<string, Provider> = { claude: "claude", codex: "codex", agy: "antigravity", grok: "grok", opencode: "opencode" };
+export const agentProvider: Record<string, Provider> = { claude: "claude", codex: "codex", agy: "antigravity", grok: "grok", opencode: "opencode", muse: "muse" };
 
 /** Every shell's state, by tab id, from the backend: it judges busy / attention for all of them, whichever window or
  * workspace (if any) shows the tab. */

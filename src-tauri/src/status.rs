@@ -32,9 +32,10 @@ const OSC_MAX: usize = 4096; // longer ones (OSC 52 clipboard pastes) are cut; t
 // An agent asking the user something: approval prompts (Claude Code's "Do you want to proceed?" / "make this edit",
 // Codex's "Would you like to run the following command?", Antigravity's "Run this command?" / "Allow access to this
 // file?"), the choices under them ("Yes, and don't ask again", "Yes, and always allow ...", "No, and tell ... what to
-// do differently" in all three), Claude's question picker, or a question at the end of a reply. Matched on letters
+// do differently" in all three; Muse Code's "Allow for this session" / "Block for this session"), Muse Code's "Do you
+// trust this workspace?", Claude's question picker, or a question at the end of a reply. Matched on letters
 // and digits only: TUIs that redraw by diff (Codex) move the cursor over unchanged blanks instead of writing spaces.
-const ASKS: [&str; 10] = [
+const ASKS: [&str; 13] = [
     "doyouwant",
     "wouldyoulike",
     "entertoselect",
@@ -45,9 +46,22 @@ const ASKS: [&str; 10] = [
     "allowaccessto",
     "allowcalling",
     "allowcreation",
+    "allowforthissession",
+    "blockforthissession",
+    "doyoutrust",
 ];
 // Of those, the ones only an approval prompt shows (the rest may be a question: Claude's picker, a reply ending in one).
-const APPROVALS: [&str; 7] = ["yesanddont", "yesandalways", "noandtell", "runthiscommand", "allowaccessto", "allowcalling", "allowcreation"];
+const APPROVALS: [&str; 9] = [
+    "yesanddont",
+    "yesandalways",
+    "noandtell",
+    "runthiscommand",
+    "allowaccessto",
+    "allowcalling",
+    "allowcreation",
+    "allowforthissession",
+    "blockforthissession",
+];
 const TEXT_MAX: usize = 32;
 
 /// What a prompt that's up asks for. An approval's choices are drawn after its question: they turn a question into one.
@@ -140,10 +154,10 @@ impl Signals {
     }
 }
 
-// Working or not: these put a spinner at the start of the terminal title while working (Claude ◐◑, Codex and Grok
-// braille) and drop it when done. Output is no use for them: Grok animates its logo while idle. The rest are judged by
+// Working or not: these put a spinner at the start of the terminal title while working (Claude ◐◑, Codex, Grok and
+// Muse braille) and drop it when done. Output is no use for them: Grok animates its logo while idle. The rest are judged by
 // output that isn't an echo of input: idle agents' screens stay still.
-const TITLED: [&str; 3] = ["claude", "codex", "grok"];
+const TITLED: [&str; 4] = ["claude", "codex", "grok", "muse"];
 const QUIET: u64 = 1500; // ms without output that counts as idle
 const SETTLED: Duration = Duration::from_millis(3000); // output-judged agents: shorter bursts (startup banner) aren't a finished turn
 const IN_VIEW: Duration = Duration::from_millis(2500); // a window reported the tab on screen this recently (they poll every second)
@@ -258,6 +272,8 @@ mod tests {
         assert!(!busy("codex", "fleet_command", Some(0)));
         assert!(busy("grok", "⠧ - Responding - grok", Some(9999)));
         assert!(!busy("grok", "grok", Some(0))); // idle logo animation: output doesn't count
+        assert!(busy("muse", "⠹ ws", Some(9999)));
+        assert!(!busy("muse", "ws", Some(0))); // its redrawn status rows while idle don't count
     }
 
     #[test]
@@ -361,6 +377,12 @@ mod tests {
         assert!(!s.asked);
         // Antigravity's prompts, and the choices under them.
         for prompt in [&b"\x1b[1mRun this command?\x1b[0m"[..], b"Allow access to this URL?", b" 2. Yes, and always allow 'git' in this conversation", b"No, and tell agy what to do differently"] {
+            let mut s = Signals::default();
+            s.feed(prompt, false);
+            assert!(s.asked, "{}", String::from_utf8_lossy(prompt));
+        }
+        // Muse Code's approval choices and its workspace trust question.
+        for prompt in [&b"\x1b[9;3H2  Allow for this session"[..], b"4  Block for this session", b"\x1b[1mDo you trust this workspace?"] {
             let mut s = Signals::default();
             s.feed(prompt, false);
             assert!(s.asked, "{}", String::from_utf8_lossy(prompt));

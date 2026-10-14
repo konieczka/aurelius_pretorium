@@ -280,10 +280,11 @@ fn hang_up(mut s: Session) {
 }
 
 /// Coding agent CLIs a terminal can run, by the command that starts them (Antigravity's is `agy`).
-const AGENTS: [&str; 5] = ["claude", "codex", "agy", "grok", "opencode"];
+const AGENTS: [&str; 6] = ["claude", "codex", "agy", "grok", "opencode", "muse"];
 
 /// The agent a process command line runs: its program, or the script given to an interpreter (npm installs such as
-/// Codex's are `node .../bin/codex`). Names may carry an extension or a version: claude.exe, codex.js, grok-1.0.50.
+/// Codex's are `node .../bin/codex`). Names may carry an extension or a version: claude.exe, codex.js, grok-1.0.50, or
+/// be the versioned binary a launcher script execs (muse-bin-1.4.7-R6101.1).
 fn agent_in(args: &str) -> Option<&'static str> {
     // ponytail: splits on whitespace, so an install path with spaces isn't recognized.
     let name = |w: &str| w.rsplit('/').next().unwrap_or(w).split('.').next().unwrap_or("").to_string();
@@ -293,7 +294,9 @@ fn agent_in(args: &str) -> Option<&'static str> {
         prog = name(words.find(|w| !w.starts_with('-'))?);
     }
     AGENTS.iter().copied().find(|a| {
-        prog == *a || prog.strip_prefix(a).and_then(|r| r.strip_prefix('-')).is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+        let rest = prog.strip_prefix(a).and_then(|r| r.strip_prefix('-'));
+        let version = rest.map(|r| r.strip_prefix("bin-").unwrap_or(r));
+        prog == *a || version.is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
     })
 }
 
@@ -1199,6 +1202,10 @@ mod tests {
         assert_eq!(agent_in("node --no-warnings /x/opencode.js"), Some("opencode"));
         assert_eq!(agent_in("/Users/me/.grok/bin/grok-1.0.50"), Some("grok"));
         assert_eq!(agent_in("agy"), Some("agy"));
+        assert_eq!(agent_in("/Users/me/.local/bin/muse-bin-1.4.7-R6101.1 --model muse-spark-1.3"), Some("muse"));
+        assert_eq!(agent_in("bash /Users/me/.local/bin/muse resume --last"), Some("muse"));
+        assert_eq!(agent_in("musescore"), None);
+        assert_eq!(agent_in("muse-bin"), None);
         assert_eq!(agent_in("/bin/sh ./codex --flag"), Some("codex"));
         assert_eq!(agent_in("vim claude.md"), None);
         assert_eq!(agent_in("node server.js"), None);

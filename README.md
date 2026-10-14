@@ -1,8 +1,8 @@
 # Pretorium
 
-A macOS workspace for running a fleet of coding agents (Claude Code, Codex, Antigravity, Grok, OpenCode) side by
-side: tiled terminals across workspaces and windows, with a file tree, editor, diffs and git alongside, plus views
-for the agents' usage limits, skills and settings.
+A macOS workspace for running a fleet of coding agents (Claude Code, Codex, Antigravity, Grok, OpenCode, Muse
+Code) side by side: tiled terminals across workspaces and windows, with a file tree, editor, diffs and git alongside,
+plus views for the agents' usage limits, skills and settings.
 
 Built with Tauri 2 (Rust) and SvelteKit (Svelte 5).
 

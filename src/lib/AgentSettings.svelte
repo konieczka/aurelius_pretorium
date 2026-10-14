@@ -40,6 +40,8 @@
   const unsaved = (p: Provider) => !!agents.scan?.agents.find((a) => a.agent === p)?.files.some((f) => agents.drafts[f.path] !== undefined);
 
   function scopeHint(f: ConfigFile) {
+    if (f.scope === "global" && agents.selected === "muse")
+      return `Every project on this Mac; projects add only hooks (.muse/hooks.json) and MCP servers (.mcp.json). Muse won't start unless it keeps "schema_version": 1. ${short(f.path)}`;
     if (f.scope === "global") return `Every project on this Mac. ${short(f.path)}`;
     if (f.scope === "local") return `Only you, only in ${folder}; Claude keeps it out of git. ${short(f.path)}`;
     const shared = agents.selected === "claude" ? "Committed with the project, so everyone on it gets these." : `Only in ${folder}.`;

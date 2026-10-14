@@ -1,8 +1,8 @@
 //! Usage insights: token stats from the AI CLIs' local session logs, and subscription limits.
 //! Claude Code and Codex logs carry exact token counts; Grok's come from its CLI (`grok usage`); Antigravity and OpenCode
-//! keep theirs in SQLite (read with macOS's sqlite3; Antigravity's records are protobuf). Limits: Codex logs a snapshot
-//! with every response; Claude's come from Anthropic's usage endpoint, Grok's and Antigravity's from their CLIs.
-//! OpenCode doesn't expose its limits.
+//! keep theirs in SQLite (read with macOS's sqlite3; Antigravity's records are protobuf); Muse Code logs each model call's
+//! tokens in its session JSONL. Limits: Codex logs a snapshot with every response; Claude's come from Anthropic's usage
+//! endpoint, Grok's and Antigravity's from their CLIs. OpenCode and Muse Code don't expose theirs.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -24,6 +24,7 @@ pub enum Provider {
     Antigravity,
     #[serde(rename = "opencode")]
     OpenCode,
+    Muse,
 }
 
 /// Tokens one session spent on one model within one hour (epoch ms of the hour's start).
@@ -103,6 +104,7 @@ impl FileScan {
         match provider {
             Provider::Claude => self.claude(line),
             Provider::Codex => self.codex(line),
+            Provider::Muse => self.muse(line),
             Provider::Grok | Provider::Antigravity | Provider::OpenCode => {} // not line logs: see `collect`
         }
     }
@@ -169,6 +171,26 @@ impl FileScan {
         let model = if self.model.is_empty() { "codex".to_string() } else { self.model.clone() };
         self.add(Provider::Codex, &model, at, d[0].saturating_sub(d[1]), d[1], d[2], d[0] + d[2]);
     }
+
+    /// One `model_completed` run event per model call, with that call's tokens and model; `recorded_at` is epoch µs.
+    fn muse(&mut self, line: &str) {
+        if !line.contains("\"model_completed\"") {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+        let e = &v["payload"]["event"];
+        let Some(at) = v["recorded_at"].as_i64().map(|us| us / 1000) else { return };
+        if e["kind"] != "model_completed" {
+            return;
+        }
+        let u = &e["usage"];
+        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        // ponytail: input_tokens taken to include the cached part (OpenAI-style cached_tokens; cache_read_tokens is
+        // its Anthropic-style twin), as every call seen so far had none cached.
+        let (input, cached, output) = (n("input_tokens"), n("cached_tokens").max(n("cache_read_tokens")), n("output_tokens"));
+        let model = e["model"].as_str().unwrap_or("muse").to_string();
+        self.add(Provider::Muse, &model, at, input.saturating_sub(cached), cached, output, input + output);
+    }
 }
 
 /// Read what was appended to `path` since the last scan (all of it if it shrank, i.e. was rewritten).
@@ -210,6 +232,17 @@ fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
 }
 
+fn muse_sessions() -> PathBuf {
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".local/share"));
+    data.join("muse/sessions")
+}
+
+/// A Muse log's session: the folder under the day's, which a subagent's log is nested in too.
+fn muse_session(path: &Path) -> String {
+    let rel = path.strip_prefix(muse_sessions()).unwrap_or(path);
+    rel.components().nth(3).map_or_else(String::new, |c| c.as_os_str().to_string_lossy().into_owned())
+}
+
 /// Every log file, by provider.
 fn sources() -> Vec<(Provider, PathBuf)> {
     let h = home();
@@ -220,6 +253,8 @@ fn sources() -> Vec<(Provider, PathBuf)> {
         (Provider::Codex, h.join(".codex/sessions"), &jsonl),
         (Provider::Codex, h.join(".codex/archived_sessions"), &jsonl),
         (Provider::Grok, h.join(".grok/sessions"), &|p: &Path| p.file_name().is_some_and(|n| n == "updates.jsonl")),
+        // sessions/YYYY/MM/DD/<id>/session.jsonl, and its subagents' at <id>/subagent/<child>/session.jsonl
+        (Provider::Muse, muse_sessions(), &|p: &Path| p.file_name().is_some_and(|n| n == "session.jsonl")),
     ] {
         let mut files = Vec::new();
         walk(&dir, &mut files, keep);
@@ -468,6 +503,9 @@ fn collect(since: i64) -> Vec<Row> {
             } else {
                 if provider == Provider::Codex && f.session.is_empty() {
                     f.session = path.file_stem().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                }
+                if provider == Provider::Muse && f.session.is_empty() {
+                    f.session = muse_session(&path);
                 }
                 if scan(provider, &path, meta.len(), f).is_err() {
                     continue;
@@ -845,6 +883,28 @@ mod tests {
         assert_eq!((r.uncached, r.cached, r.output, r.total), (24, 200, 12, 236));
         assert_eq!(r.session, "s1");
         assert_eq!(r.hour, 1_791_511_200_000);
+    }
+
+    #[test]
+    fn muse_counts_each_model_call() {
+        let call = |input: u64, cached: u64, out: u64| {
+            format!(
+                r#"{{"schema_version":1,"stream":{{"kind":"session","id":"s1"}},"recorded_at":1791977777648435,"payload_type":"runtime.session","payload":{{"kind":"run","event":{{"kind":"model_completed","usage":{{"input_tokens":{input},"output_tokens":{out},"cached_tokens":{cached},"cache_write_tokens":0,"cache_read_tokens":0,"reasoning_tokens":4}},"duration_ms":3277,"model":"muse-spark-1.3"}}}}}}"#
+            )
+        };
+        let mut f = FileScan::default();
+        f.line(Provider::Muse, &call(26359, 0, 15));
+        f.line(Provider::Muse, &call(30000, 26000, 40));
+        // Other usage records (process stats) aren't tokens.
+        f.line(Provider::Muse, r#"{"recorded_at":1791977780918067,"payload":{"kind":"run","event":{"kind":"resource_usage_sampled","usage":{"rss_self_bytes":195051520}}}}"#);
+        let rows: Vec<_> = f.rows.values().collect();
+        assert_eq!(rows.len(), 1);
+        let r = rows[0];
+        assert_eq!((r.uncached, r.cached, r.output, r.total), (30359, 26000, 55, 56414));
+        assert_eq!(r.model, "muse-spark-1.3");
+        assert_eq!(r.hour, 1_791_975_600_000);
+        let p = muse_sessions().join("2026/10/14/01a13a32/subagent/child/session.jsonl");
+        assert_eq!(muse_session(&p), "01a13a32");
     }
 
     fn codex_count(ts: &str, input: u64, cached: u64, output: u64) -> String {

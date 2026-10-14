@@ -21,7 +21,7 @@ export type Row = {
 
 /** A title without the agent's status glyph in front, its folder (the rows are grouped by project, and show it
  * otherwise) or its own command (the row names the agent): "⠐ Fix the bug" -> "Fix the bug", "Fix the bug | app" ->
- * "Fix the bug", "- Responding - grok" -> "Responding". Codex's is just its folder, Grok's idle one just "grok": "". */
+ * "Fix the bug", "- Responding - grok" -> "Responding". Codex's and Muse's are just its folder, Grok's idle one just "grok": "". */
 export function cleanTitle(t: string, cwd = "", agent = "") {
   let c = t.replace(/^[^\p{L}\p{N}]+/u, "").trim();
   for (const name of [cwd.slice(cwd.lastIndexOf("/") + 1), agent]) {

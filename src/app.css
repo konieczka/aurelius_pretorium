@@ -109,6 +109,7 @@
   --usage-grok: #5272d0;
   --usage-antigravity: #a07a10;
   --usage-opencode: #b04f8f;
+  --usage-muse: #7a5bc4;
 
   /* File tree icons (fileIcons.ts) */
   --fi-blue: oklch(0.56 0.15 255);
@@ -199,6 +200,7 @@
   --usage-grok: #6481da;
   --usage-antigravity: #b08d1c;
   --usage-opencode: #c0619f;
+  --usage-muse: #9a7ddc;
 
   --fi-blue: oklch(0.72 0.13 255);
   --fi-sky: oklch(0.77 0.11 225);

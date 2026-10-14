@@ -79,7 +79,7 @@
   {:else}
     <div class="empty">
       <p>No agents running.</p>
-      <p class="small">Start <code>claude</code>, <code>codex</code>, <code>grok</code>, <code>agy</code> or <code>opencode</code> in a terminal and it shows up here, from any workspace or window.</p>
+      <p class="small">Start <code>claude</code>, <code>codex</code>, <code>grok</code>, <code>agy</code>, <code>opencode</code> or <code>muse</code> in a terminal and it shows up here, from any workspace or window.</p>
     </div>
   {/if}
 
