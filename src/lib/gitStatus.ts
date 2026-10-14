@@ -1,4 +1,4 @@
-// Parser for `git status --porcelain=v2 -z --branch [--ignored=matching]`.
+// Parser for `git status --porcelain=v2 -z --branch [--ignored=matching] [--untracked-files=all]`.
 
 export type GitFile = {
   path: string; // relative to the repo root

@@ -615,7 +615,8 @@ async fn list_dir(path: String) -> Res<Vec<Entry>> {
             .filter_map(|e| e.ok())
             .map(|e| Entry {
                 name: e.file_name().to_string_lossy().into_owned(),
-                is_dir: e.file_type().map(|t| t.is_dir()).unwrap_or(false),
+                // A link to a folder is one (skills linked between agents' folders): the tree opens it, not reads it.
+                is_dir: e.file_type().is_ok_and(|t| t.is_dir() || (t.is_symlink() && e.path().is_dir())),
             })
             .collect();
         out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));

@@ -50,7 +50,7 @@
     const stale = () => seq !== refreshes || ws !== app.workspace;
     try {
       const [root, gitDir] = (await invoke<string>("git", { cwd: ws, args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"] })).trim().split("\n");
-      const raw = await invoke<string>("git", { cwd: root, args: ["status", "--porcelain=v2", "-z", "--branch", "--ignored=matching"] });
+      const raw = await invoke<string>("git", { cwd: root, args: ["status", "--porcelain=v2", "-z", "--branch", "--ignored=matching", "--untracked-files=all"] });
       const op = await detectOp(gitDir);
       if (stale()) return;
       git.root = root;
