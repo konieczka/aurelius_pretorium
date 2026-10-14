@@ -68,18 +68,25 @@ export function foreignOwner(t: L.Tab) {
 
 /** root = toplevel; main = the main checkout's toplevel when this is a linked worktree. "" root = not a repo. */
 export type Repo = { root: string; branch: string; main: string };
+const repoLooks: Record<string, number> = {};
 /** Look up `folder`'s checkout; agents may switch branches at any time, so GitPanel calls this on every poll. */
 export async function refreshRepo(folder: string) {
   const git = (args: string[]) => invoke<string>("git", { cwd: folder, args }).then((o) => o.trim());
+  // Looks overlap (header, polls): only the latest one started may write, else a slow one shows an old branch.
+  const look = (repoLooks[folder] = (repoLooks[folder] ?? 0) + 1);
+  const set = (r: Repo) => {
+    const was = app.repos[folder];
+    if (look === repoLooks[folder] && (!was || was.root !== r.root || was.branch !== r.branch || was.main !== r.main)) app.repos[folder] = r;
+  };
   try {
     const [[root, gitDir, common], branch] = await Promise.all([
       git(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"]).then((o) => o.split("\n")),
       git(["branch", "--show-current"]).then((b) => b || git(["rev-parse", "--short", "HEAD"])).catch(() => ""),
     ]);
     const main = gitDir === common ? "" : common.replace(/\/\.git\/?$/, "");
-    app.repos[folder] = { root, branch, main };
+    set({ root, branch, main });
   } catch {
-    app.repos[folder] = { root: "", branch: "", main: "" };
+    set({ root: "", branch: "", main: "" });
   }
 }
 

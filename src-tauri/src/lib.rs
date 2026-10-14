@@ -25,6 +25,7 @@ struct Session {
     cwd: String, // where it is: starts as the tab's folder, follows `cd` (see `cwd_of`), or its agent's work
     watch: status::Watch,
     work: workdir::Work, // where its agent's commands run
+    transcript: workdir::Transcript, // where its agent says it is (Claude Code)
     moved: Option<String>, // where its agent's own process last was, when not where the shell is
 }
 
@@ -211,7 +212,7 @@ fn pty_open(
         }
     });
 
-    sessions.insert(id, Session { input, master: pair.master, child, out, cwd, watch: Default::default(), work: Default::default(), moved: None });
+    sessions.insert(id, Session { input, master: pair.master, child, out, cwd, watch: Default::default(), work: Default::default(), transcript: Default::default(), moved: None });
     Ok(true)
 }
 
@@ -362,14 +363,16 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
         let shell = s.child.process_id().and_then(cwd_of);
         let agent = agents.get(id);
         let moved = agent.and_then(|(_, pids)| pids.iter().filter_map(|&p| cwd_of(p)).find(|c| Some(c) != shell.as_ref()));
-        s.work.set_agents(agent.map(|(_, pids)| pids.clone()).unwrap_or_default());
+        // Claude Code records where it is: no guessing from its processes, nor sampling them.
+        let told = agent.filter(|(a, _)| *a == "claude").and_then(|(_, pids)| s.transcript.claude(pids));
+        s.work.set_agents(agent.filter(|_| told.is_none()).map(|(_, pids)| pids.clone()).unwrap_or_default());
         // The agent moving itself is newer than any command it ran before.
         if moved != s.moved {
             s.moved = moved.clone();
             s.work.dir = None;
         }
         // Then where its latest command ran: that's where it works, though the agent itself stays put.
-        if let Some(cwd) = s.work.dir.clone().or(moved).or(shell) {
+        if let Some(cwd) = told.or(s.work.dir.clone()).or(moved).or(shell) {
             s.cwd = cwd;
         }
         let mut o = s.out.lock().unwrap();

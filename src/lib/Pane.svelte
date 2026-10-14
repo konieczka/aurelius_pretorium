@@ -66,7 +66,7 @@
   const key = $derived(tab ? repoKey(tab) : "");
   const repo = $derived(app.repos[key]);
   $effect(() => {
-    if (key && !(key in app.repos)) refreshRepo(key); // new folder: don't wait for the next git poll
+    if (key) refreshRepo(key); // moved: not the branch from the last look here, nor wait for the next git poll
   });
   const where = $derived.by(() => {
     if (!tab || !owner) return null;

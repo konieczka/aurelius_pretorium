@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as L from "./layout";
-import { allTabs, app } from "./state.svelte";
+import { allTabs, app, refreshRepo, repoKey } from "./state.svelte";
 import type { Provider } from "./usageStats";
 import { turnDone, type Turn } from "./agentTurn";
 
@@ -86,6 +86,8 @@ function runScripts(found: Record<string, Shell>, now: number) {
 /** Tabs on screen here: the active tab of each pane, if this window has focus. */
 const inView = () => (document.hasFocus() ? L.panes(app.root).flatMap((p) => p.tabs[p.active]?.id ?? []) : []);
 
+let branchesAt = 0;
+
 async function poll() {
   let found: Record<string, Shell>;
   try {
@@ -105,6 +107,12 @@ async function poll() {
     if (agent) starting.delete(t.id);
     else if ((starting.get(t.id) ?? 0) > now) continue;
     if (t.agent !== agent) t.agent = agent; // only on change: every write re-saves the layout
+  }
+  // Agents switch branches whether this window has focus or not (the git panel's poll waits for it): keep their tabs'
+  // headers current.
+  if (now - branchesAt >= 3000) {
+    branchesAt = now;
+    new Set(allTabs().flatMap((t) => (t.kind === "term" && found[t.id]?.agent ? repoKey(t) : []))).forEach(refreshRepo);
   }
   for (const [id, s] of Object.entries(found)) {
     const a = s.busy ? "busy" : s.attention ? "attention" : undefined;
