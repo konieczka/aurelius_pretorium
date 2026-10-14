@@ -249,6 +249,8 @@ fn read_entry(d: Dialect, v: &Value) -> Read {
             let conv = |x: &mut String| *x = from_opencode(x);
             s.args.iter_mut().for_each(conv);
             s.env.iter_mut().chain(s.headers.iter_mut()).for_each(|(_, x)| conv(x));
+            conv(&mut s.command);
+            conv(&mut s.cwd);
             conv(&mut s.url);
         }
         Dialect::Antigravity => {
@@ -328,9 +330,12 @@ fn to_opencode(s: &str, lost: &mut Vec<String>) -> String {
     out + &s[at..]
 }
 
-/// A value the page may show: a reference to a variable or file rather than a literal (which may be a token).
+/// A value the page may show: references to variables or files rather than a literal (which may be a token). A
+/// reference with a fallback (`${TOKEN:-sk-...}`) holds a literal, so it stays hidden too.
 fn shown(v: &str) -> Option<String> {
-    (v.is_empty() || !refs(v).is_empty() || v.contains("{file:")).then(|| v.to_string())
+    let r = refs(v);
+    let plain = r.iter().all(|(_, _, inner)| var_name(inner));
+    (v.is_empty() || (!r.is_empty() && plain) || v.contains("{file:")).then(|| v.to_string())
 }
 
 // ---- Writing each spelling
@@ -610,6 +615,9 @@ pub struct Block {
     reason: String,
     /// The file whose definition it uses instead.
     by: Option<String>,
+    /// The agent skips this definition entirely (untrusted project, rejected), so it can't override another one.
+    #[serde(skip)]
+    ignored: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -675,30 +683,30 @@ fn target(s: &Src) -> Target {
 }
 
 fn blocks(src: &Src, name: &str, r: &Read, t: &Trust) -> Vec<Block> {
-    let block = |agent, reason: &str| Block { agent, reason: reason.into(), by: None };
     let mut out = Vec::new();
     for &(a, _) in &src.readers {
+        // (reason, whether the agent skips the definition altogether)
         let why = if !r.enabled {
-            Some("Turned off")
+            Some(("Turned off", false))
         } else if a == Grok && !valid_name(name) {
-            Some("Grok skips servers whose name doesn't start with a letter or holds anything but letters, digits, _ and -")
+            Some(("Grok skips servers whose name doesn't start with a letter or holds anything but letters, digits, _ and -", false))
         } else if a == Grok && t.grok_off.iter().any(|n| n == name) {
-            Some("Turned off in Grok")
+            Some(("Turned off in Grok", false))
         } else if src.scope != Scope::Project {
             None
         } else {
             match (a, src.dialect) {
-                (Codex, _) if !t.codex => Some("Codex reads project settings only in trusted projects"),
-                (Grok, Dialect::Grok) if !t.grok => Some("Grok applies project settings once the folder is trusted"),
-                (Muse, _) if !t.muse => Some("Muse Code loads .mcp.json only in trusted workspaces"),
-                (Muse, _) if matches!(r.spec.transport, Transport::Sse | Transport::Ws) => Some("Muse Code connects only over stdio and streamable HTTP"),
-                (Claude, _) if t.claude_off.iter().any(|n| n == name) => Some("Turned off in Claude Code (/mcp turns it back on)"),
-                (Claude, _) if !t.claude_all && !t.claude_on.iter().any(|n| n == name) => Some("Claude Code asks you to approve it on its next start"),
+                (Codex, _) if !t.codex => Some(("Codex reads project settings only in trusted projects", true)),
+                (Grok, Dialect::Grok) if !t.grok => Some(("Grok applies project settings once the folder is trusted", true)),
+                (Muse, _) if !t.muse => Some(("Muse Code loads .mcp.json only in trusted workspaces", true)),
+                (Muse, _) if matches!(r.spec.transport, Transport::Sse | Transport::Ws) => Some(("Muse Code connects only over stdio and streamable HTTP", false)),
+                (Claude, _) if t.claude_off.iter().any(|n| n == name) => Some(("Turned off in Claude Code (/mcp turns it back on)", true)),
+                (Claude, _) if !t.claude_all && !t.claude_on.iter().any(|n| n == name) => Some(("Claude Code asks you to approve it on its next start", false)),
                 _ => None,
             }
         };
-        if let Some(why) = why {
-            out.push(block(a, why));
+        if let Some((reason, ignored)) = why {
+            out.push(Block { agent: a, reason: reason.into(), by: None, ignored });
         }
     }
     out
@@ -756,9 +764,13 @@ fn scan(home: &Path, project: &Path) -> Scan {
     for (n, (i, e)) in entries.iter().enumerate() {
         for &a in &e.agents {
             let mine = rank(*i, a);
-            let better = entries.iter().filter(|(j, o)| o.name == e.name && j != i).find(|(j, _)| rank(*j, a).is_some_and(|r| Some(r) < mine));
+            let skipped = |o: &Entry| o.blocked.iter().any(|b| b.agent == a && b.ignored);
+            let better = entries
+                .iter()
+                .filter(|(j, o)| o.name == e.name && j != i && !skipped(o))
+                .find(|(j, _)| rank(*j, a).is_some_and(|r| Some(r) < mine));
             if let Some((_, o)) = better {
-                shadows.push((n, Block { agent: a, reason: "Uses another definition".into(), by: Some(o.path.clone()) }));
+                shadows.push((n, Block { agent: a, reason: "Uses another definition".into(), by: Some(o.path.clone()), ignored: false }));
             }
         }
     }
@@ -1013,18 +1025,24 @@ pub fn mcp_copy(project: String, from: Place, targets: Vec<Target>, replace: boo
     copy(&home(), Path::new(&project), &from, &targets, replace, dry_run)
 }
 
-fn update(home: &Path, project: &Path, p: &Place, input: &SpecInput) -> Res<Vec<Report>> {
+fn update(home: &Path, project: &Path, p: &Place, input: &SpecInput, fingerprint: &str) -> Res<Vec<Report>> {
     let (src, v) = read_place(home, project, p)?;
-    let spec = resolve(input, Some(&read_entry(src.dialect, &v).spec))?;
+    let current = read_entry(src.dialect, &v).spec;
+    // The form was filled from what the page last read; saving over a change made since would undo it.
+    if self::fingerprint(&current) != fingerprint {
+        return Err(format!("\u{201c}{}\u{201d} changed in {} since you opened it. Cancel and edit it again.", p.name, p.path));
+    }
+    let spec = resolve(input, Some(&current))?;
     let t = Target { path: p.path.clone(), table: p.table.clone() };
     let (reports, writes) = plan(home, project, &[t], &p.name, &spec, None, true);
     finish(reports, writes, false)
 }
 
-/// Change one definition from the form; the agent's own keys (timeouts, OAuth...) stay.
+/// Change one definition from the form; the agent's own keys (timeouts, OAuth...) stay. `fingerprint`: the
+/// definition's when the form was filled; the update is refused if it has changed since.
 #[tauri::command]
-pub fn mcp_update(project: String, place: Place, spec: SpecInput) -> Res<Vec<Report>> {
-    update(&home(), Path::new(&project), &place, &spec)
+pub fn mcp_update(project: String, place: Place, spec: SpecInput, fingerprint: String) -> Res<Vec<Report>> {
+    update(&home(), Path::new(&project), &place, &spec, &fingerprint)
 }
 
 fn remove(home: &Path, project: &Path, places: &[Place]) -> Res<()> {
@@ -1136,8 +1154,8 @@ mod tests {
 
     #[test]
     fn reads_each_agents_fields() {
-        let oc = read_entry(Dialect::OpenCode, &json!({ "type": "local", "command": ["bun", "x", "{env:DIR}"], "environment": { "K": "{env:K}" }, "enabled": false }));
-        assert_eq!((oc.spec.command.as_str(), oc.spec.args.clone(), oc.enabled), ("bun", vec!["x".to_string(), "${DIR}".into()], false));
+        let oc = read_entry(Dialect::OpenCode, &json!({ "type": "local", "command": ["{env:BIN}", "x", "{env:DIR}"], "environment": { "K": "{env:K}" }, "enabled": false }));
+        assert_eq!((oc.spec.command.as_str(), oc.spec.args.clone(), oc.enabled), ("${BIN}", vec!["x".to_string(), "${DIR}".into()], false));
         assert_eq!(oc.spec.env, [("K".into(), "${K}".into())]);
         let ag = read_entry(Dialect::Antigravity, &json!({ "serverUrl": "https://a", "disabled": true, "disabledTools": ["x"] }));
         assert_eq!((ag.spec.transport, ag.enabled, ag.extra.clone()), (Transport::Http, false, vec!["disabledTools".to_string()]));
@@ -1167,10 +1185,13 @@ mod tests {
     #[test]
     fn literals_are_hidden() {
         let s = stdio("x", &[], &[("TOKEN", "sk-secret"), ("REF", "${REF}"), ("FILE", "{file:~/t}")]);
-        let shown = serde_json::to_string(&show(&s)).unwrap();
-        assert!(!shown.contains("sk-secret"));
-        assert!(shown.contains("${REF}") && shown.contains("{file:~/t}"));
+        let json = serde_json::to_string(&show(&s)).unwrap();
+        assert!(!json.contains("sk-secret"));
+        assert!(json.contains("${REF}") && json.contains("{file:~/t}"));
         assert_eq!(literals(&s), ["env TOKEN"]);
+        // A fallback is a literal inside a reference.
+        assert_eq!(shown("${TOKEN:-sk-secret}"), None);
+        assert_eq!(shown("Bearer ${TOKEN}").as_deref(), Some("Bearer ${TOKEN}"));
         assert_ne!(fingerprint(&s), fingerprint(&stdio("x", &[], &[("TOKEN", "sk-other"), ("REF", "${REF}"), ("FILE", "{file:~/t}")])));
         assert_eq!(fingerprint(&stdio("x", &[], &[("A", "1"), ("B", "2")])), fingerprint(&stdio("x", &[], &[("B", "2"), ("A", "1")])));
     }
@@ -1213,6 +1234,15 @@ mod tests {
         write(proj.join(".claude/settings.local.json"), r#"{ "enabledMcpjsonServers": ["pw"] }"#);
         let r = scan(&home, &proj);
         assert!(r.entries.iter().find(|e| e.name == "pw" && e.scope == Scope::Project).unwrap().blocked.is_empty());
+
+        // An untrusted project's Codex config doesn't override the global one: Codex skips the file.
+        write(proj.join(".codex/config.toml"), "[mcp_servers.pw]\ncommand = \"other\"\n");
+        let r = scan(&home, &proj);
+        let global = r.entries.iter().find(|e| e.name == "pw" && e.scope == Scope::Global).unwrap();
+        assert!(global.blocked.is_empty());
+        write(home.join(".codex/config.toml"), &format!("[mcp_servers.pw]\ncommand = \"npx\"\n\n[projects.\"{p}\"]\ntrust_level = \"trusted\"\n"));
+        let r = scan(&home, &proj);
+        assert!(r.entries.iter().find(|e| e.name == "pw" && e.scope == Scope::Global).unwrap().blocked.iter().any(|b| b.by.is_some()));
 
         // Grok can be told not to read Claude's servers.
         write(home.join(".grok/config.toml"), "[compat.claude]\nmcps = false\n");
@@ -1276,7 +1306,9 @@ mod tests {
         // Updating keeps unseen values and the agent's own keys.
         let mut edit = input(&http("https://s2", &[]));
         edit.headers = vec![PairInput { key: "Authorization".into(), value: None }];
-        update(&home, &proj, &from, &edit).unwrap();
+        let before = fingerprint(&read_entry(Dialect::Claude, &raw(&find(&home, &proj, &from.path, &from.table).unwrap(), &std::fs::read_to_string(&cj).unwrap(), "sentry").unwrap().unwrap()).spec);
+        assert!(update(&home, &proj, &from, &edit, "stale").unwrap_err().contains("changed"));
+        update(&home, &proj, &from, &edit, &before).unwrap();
         let v = raw(&find(&home, &proj, &from.path, &from.table).unwrap(), &std::fs::read_to_string(&cj).unwrap(), "sentry").unwrap().unwrap();
         assert_eq!(v, json!({ "type": "http", "url": "https://s2", "headers": { "Authorization": "sk-lit" }, "timeout": 5 }));
 

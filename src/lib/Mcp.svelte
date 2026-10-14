@@ -66,7 +66,12 @@
     }
     const text = reportText(dry, short);
     if (text && !(await ask(text, { title, kind: "warning", okLabel, cancelLabel: "Cancel" }))) return false;
-    await call(false);
+    // A file can change while the dialog is open: then nothing was written.
+    const failedNow = (await call(false)).filter((r) => r.error);
+    if (failedNow.length) {
+      await message(failedNow.map((r) => `${short(r.path)}: ${r.error}`).join("\n"), { kind: "error", title });
+      return false;
+    }
     return true;
   }
 
@@ -175,7 +180,7 @@
     picked = (mcp.scan?.presets.find((p) => p.scope === scope)?.targets ?? []).slice();
   }
   function startEdit(e: Entry) {
-    mcp.form = { kind: "edit", place: placeOf(e) };
+    mcp.form = { kind: "edit", place: placeOf(e), fingerprint: e.fingerprint };
     name = e.name;
     fill(e.spec);
   }
@@ -201,7 +206,7 @@
         if (!(await confirmed(call, `Add “${name}”?`, "Add"))) return;
         mcp.selected = `${f.scope === "project" && picked.every((t) => sources.find((s) => sameFile(s, t))?.scope === "local") ? "local" : f.scope}:${name}`;
       } else {
-        const reports = await invoke<Report[]>("mcp_update", { project: app.workspace, place: f.place, spec: input() });
+        const reports = await invoke<Report[]>("mcp_update", { project: app.workspace, place: f.place, spec: input(), fingerprint: f.fingerprint });
         const failed = reports.find((r) => r.error);
         if (failed) return void (formError = failed.error!);
         // Only what the file couldn't hold: warnings about values already in it would repeat on every save.
