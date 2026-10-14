@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
 mod agent_config;
+mod hooks;
 mod mcp;
 mod skills;
 mod status;
@@ -38,6 +39,7 @@ struct Output {
     input: Option<Instant>,  // last write or resize from the window
     active: Option<Instant>, // last output that wasn't just answering that (echo, redraw)
     signals: status::Signals,
+    asks: status::Asks,
 }
 const ECHO: std::time::Duration = std::time::Duration::from_millis(300);
 const KEEP: usize = 512 * 1024; // ponytail: raw byte tail, not a parsed screen; replays the last ~512KB of output
@@ -141,6 +143,7 @@ fn pty_open(
             let _ = on_data.send(InvokeResponseBody::Raw(Vec::new()));
         }
         out.chan = Some(on_data);
+        out.signals.resize(rows, cols);
         let _ = s.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
         return Ok(false);
     }
@@ -162,6 +165,8 @@ fn pty_open(
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    let (var, asks) = hooks::env(&id);
+    cmd.env(var, asks);
     let child = pair.slave.spawn_command(cmd).map_err(err)?;
     drop(pair.slave);
 
@@ -177,6 +182,7 @@ fn pty_open(
         }
     });
     let out = Arc::new(Mutex::new(Output { chan: Some(on_data), ..Default::default() }));
+    out.lock().unwrap().signals.resize(rows, cols);
     let sink = out.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 16 * 1024];
@@ -190,7 +196,7 @@ fn pty_open(
             if !echo {
                 o.active = Some(now);
             }
-            o.signals.feed(&buf[..n], echo);
+            o.signals.feed(&buf[..n]);
             o.recent.extend_from_slice(&buf[..n]);
             if o.recent.len() > KEEP {
                 // Cut at a line start so the replay doesn't begin mid escape sequence.
@@ -222,10 +228,9 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let s = map.get(&id).ok_or("no such pty")?;
     let mut o = s.out.lock().unwrap();
     o.input = Some(Instant::now());
-    o.signals.typed();
     // Answered (or dismissed). Focus reports the terminal sends by itself don't count.
     if !matches!(data.as_str(), "\x1b[I" | "\x1b[O") {
-        o.signals.asking = None;
+        o.asks.typed();
     }
     drop(o);
     s.input.send(data.into_bytes()).map_err(|_| "the shell has exited".into())
@@ -235,7 +240,10 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
 fn pty_resize(ptys: State<Ptys>, id: String, cols: u16, rows: u16) -> Res<()> {
     let map = ptys.sessions.lock().unwrap();
     let s = map.get(&id).ok_or("no such pty")?;
-    s.out.lock().unwrap().input = Some(Instant::now());
+    let mut o = s.out.lock().unwrap();
+    o.input = Some(Instant::now());
+    o.signals.resize(rows, cols);
+    drop(o);
     s.master
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(err)
@@ -378,11 +386,15 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
         let mut o = s.out.lock().unwrap();
         let quiet = o.active.map(|t| now.saturating_duration_since(t).as_millis() as u64);
         let rang = std::mem::take(&mut o.signals.rang);
-        let asked = std::mem::take(&mut o.signals.asked);
+        if let Some(at) = hooks::take(id) {
+            o.asks.hooked(at);
+        }
         let agent = agent.map(|(a, _)| *a);
         if agent.is_none() {
-            o.signals.asking = None; // whoever asked is gone
+            o.asks.clear(); // whoever asked is gone
         }
+        let screen = agent.and_then(|_| o.signals.prompt());
+        let (asking, asked) = o.asks.check(screen);
         let busy = s.watch.step(now, agent, &o.signals.title, quiet, rang, asked);
         if let Some(cue) = s.watch.cue.take() {
             cues.push(Cued { id: id.clone(), cue });
@@ -394,7 +406,7 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
             cwd: s.cwd.clone(),
             busy,
             attention: s.watch.attention,
-            asking: o.signals.asking,
+            asking,
             since: now.saturating_duration_since(s.watch.changed).as_millis() as u64,
         });
     }
@@ -1168,6 +1180,7 @@ pub fn run() {
             catch_promise_drops(webview);
         })
         .setup(|app| {
+            std::thread::spawn(hooks::install);
             let h = app.handle().clone();
             std::thread::spawn(move || flush_holding(&h));
             let h = app.handle().clone();
