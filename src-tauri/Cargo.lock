@@ -848,7 +848,7 @@ dependencies = [
 
 [[package]]
 name = "fleet_command"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "base64 0.22.1",
  "jsonc-parser",
