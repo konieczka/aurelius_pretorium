@@ -1,17 +1,9 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isPalette, PALETTE_TRANSITION_MS, resolvePalette, shouldAnimatePaletteChange, type Palette } from "./palette";
 
 export type Mode = "light" | "dark" | "system";
 
-/** Colour palettes (Settings). Aurelius is the default: app.css :root / .dark; the rest are blocks in palettes.css. */
-export const PALETTES = [
-  { id: "aurelius", name: "Aurelius", blurb: "The house gold on warm parchment" },
-  { id: "mare", name: "Mare Nostrum", blurb: "Lapis sea under lamp light" },
-  { id: "tyrian", name: "Tyrian", blurb: "Imperial murex purple" },
-  { id: "verdigris", name: "Verdigris", blurb: "Weathered bronze, copper accents" },
-  { id: "marmor", name: "Marmor", blurb: "Cool marble, a lapis accent" },
-  { id: "vesuvius", name: "Vesuvius", blurb: "Volcanic ash and lava" },
-] as const;
-export type Palette = (typeof PALETTES)[number]["id"];
+export { PALETTES, type Palette } from "./palette";
 
 const media = matchMedia("(prefers-color-scheme: dark)");
 const read = (k: string) => {
@@ -31,9 +23,55 @@ const storedPalette = read("palette");
 
 export const theme = $state({
   mode: (["light", "dark"].includes(storedMode!) ? storedMode : "system") as Mode,
-  palette: (PALETTES.some((p) => p.id === storedPalette) ? storedPalette : "aurelius") as Palette,
+  /** The global palette (localStorage "palette"): the fallback for workspaces without their own. */
+  globalPalette: resolvePalette(null, storedPalette),
+  /** The palette actually shown in this window: the active workspace's own, else `globalPalette`. */
+  palette: resolvePalette(document.documentElement.dataset.palette, storedPalette),
   dark: false,
+  transitioning: false,
 });
+
+// This window's active workspace override (workspaces.svelte.ts sets it on activate); null = use the global.
+let workspaceOverride: Palette | null = null;
+// The first palette a window shows is its launch palette: it must not fade in from the global default.
+let sawWorkspacePalette = false;
+let animTimer: ReturnType<typeof setTimeout> | undefined;
+
+const reducedMotion = () => {
+  try {
+    return matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+};
+
+/** Animate the inherited colour tokens for one palette switch. */
+function beginPaletteTransition(next: Palette, first: boolean) {
+  const root = document.documentElement;
+  if (first || reducedMotion()) {
+    clearTimeout(animTimer);
+    root.classList.remove("palette-anim");
+    theme.transitioning = false;
+    return;
+  }
+  if (!shouldAnimatePaletteChange(theme.palette, next)) return;
+  root.style.setProperty("--palette-duration", `${PALETTE_TRANSITION_MS}ms`);
+  root.classList.add("palette-anim");
+  theme.transitioning = true;
+  void root.offsetWidth; // settle the class before apply() flips data-palette, so the change transitions
+  clearTimeout(animTimer);
+  animTimer = setTimeout(() => {
+    root.classList.remove("palette-anim");
+    theme.transitioning = false;
+  }, PALETTE_TRANSITION_MS + 60);
+}
+
+function recompute(first = false) {
+  const next = resolvePalette(workspaceOverride, theme.globalPalette);
+  beginPaletteTransition(next, first);
+  theme.palette = next;
+  apply();
+}
 
 function apply() {
   theme.dark = theme.mode === "dark" || (theme.mode === "system" && media.matches);
@@ -51,18 +89,31 @@ export function setMode(mode: Mode) {
   apply();
 }
 
+/** Set the global palette. A workspace with its own palette keeps it in its window; this stays its fallback. */
 export function setPalette(palette: Palette) {
-  theme.palette = palette;
+  theme.globalPalette = palette;
   write("palette", palette);
-  apply();
+  recompute();
+}
+
+/** Show `override` in this window (the active workspace's own palette), or the global palette when null.
+ * Switching workspace cross-fades to it, except the first workspace a window shows. */
+export function applyWorkspacePalette(override: Palette | null | undefined) {
+  workspaceOverride = isPalette(override) ? override : null;
+  const first = !sawWorkspacePalette;
+  sawWorkspacePalette = true;
+  recompute(first);
 }
 
 // Other windows share localStorage: follow their changes
 window.addEventListener("storage", (e) => {
-  if (e.key === "theme" && e.newValue) theme.mode = e.newValue as Mode;
-  else if (e.key === "palette" && e.newValue) theme.palette = e.newValue as Palette;
-  else return;
-  apply();
+  if (e.key === "theme") {
+    theme.mode = e.newValue === "light" || e.newValue === "dark" ? e.newValue : "system";
+    apply();
+  } else if (e.key === "palette") {
+    theme.globalPalette = resolvePalette(null, e.newValue);
+    recompute();
+  }
 });
 
 const probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;

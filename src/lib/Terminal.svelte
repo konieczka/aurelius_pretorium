@@ -185,7 +185,15 @@
   $effect(() => {
     const e = entries.get(tabId);
     void theme.palette;
-    if (e) e.term.options.theme = termTheme();
+    const animating = theme.transitioning;
+    if (!e) return;
+    let frame = 0;
+    const update = () => {
+      e.term.options.theme = termTheme();
+      if (animating) frame = requestAnimationFrame(update);
+    };
+    update();
+    return () => cancelAnimationFrame(frame);
   });
 </script>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
-  import { setMode, theme, type Mode } from "./theme.svelte";
+  import { PALETTES, setMode, theme, type Mode, type Palette } from "./theme.svelte";
+  import { paletteName } from "./palette";
   import { settings, toggleSettings } from "./settingsView.svelte";
   import { awake, toggleStayAwake } from "./stayAwake.svelte";
   import { cues, toggleSoundCues } from "./soundCues.svelte";
@@ -14,7 +15,7 @@
   import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
   import { zoomLevel } from "./zoom";
   import {
-    activate, closeWorkspace, createWorkspace, deleteWorkspace, moveWorkspace, tearOut, nameOf, openHere, openInNewWindow, ownerWindow, renameWorkspace, tabsIn, ws,
+    activate, closeWorkspace, createWorkspace, deleteWorkspace, moveWorkspace, tearOut, nameOf, openHere, openInNewWindow, ownerWindow, paletteOf, renameWorkspace, setWorkspacePalette, tabsIn, ws,
   } from "./workspaces.svelte";
 
   let editing = $state(""); // workspace id being renamed
@@ -37,13 +38,26 @@
   const cycleTheme = () => setMode(nextMode[theme.mode]);
   const ThemeIcon = $derived(modes[theme.mode].icon);
 
+  async function paletteMenu(id: string) {
+    const own = paletteOf(id);
+    const v = await pick(`Palette for “${nameOf(id)}”`, [
+      { label: "Use global palette", detail: paletteName(theme.globalPalette), value: "__global", hint: own === undefined ? "Current" : undefined },
+      ...PALETTES.map((p) => ({ label: p.name, detail: p.blurb, value: p.id, hint: own === p.id ? "Current" : undefined })),
+    ]);
+    if (v === null) return;
+    setWorkspacePalette(id, v === "__global" ? null : (v as Palette));
+  }
+
   async function menu(id: string) {
+    const own = paletteOf(id);
     const v = await pick(nameOf(id), [
       { label: "Rename", value: "rename" },
+      { label: "Palette…", detail: own ? paletteName(own) : `Global · ${paletteName(theme.globalPalette)}`, value: "palette" },
       ...(ws.open.length > 1 ? [{ label: "Open in New Window", value: "window" }, { label: "Close", value: "close" }] : []),
       { label: "Delete…", value: "delete" },
     ]);
     if (v === "rename") editing = id;
+    else if (v === "palette") paletteMenu(id);
     else if (v === "window") openInNewWindow(id);
     else if (v === "close") closeWorkspace(id);
     else if (v === "delete") deleteWorkspace(id);
@@ -173,6 +187,7 @@
           }}
         />
       {:else}
+        {#if id !== ws.active && paletteOf(id)}<span class="ws-dot" data-palette={paletteOf(id)} title="Palette: {paletteName(paletteOf(id)!)}" aria-hidden="true"></span>{/if}
         <span class="name">{nameOf(id)}</span>
       {/if}
       {#if id !== ws.active && wsActivity[id] === "attention"}<span class="attention" title="An agent here needs your attention"></span>
@@ -419,6 +434,15 @@
   /* Only workspace: no close button, so keep the right padding even */
   .ws:not(:has(.x)) {
     padding-right: 12px;
+  }
+  /* A workspace with its own palette: a dot in that palette's accent colour */
+  .ws-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: var(--gold);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--gold) 60%, transparent);
   }
   .name {
     overflow: hidden;

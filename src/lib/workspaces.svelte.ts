@@ -12,25 +12,35 @@ import { closeAgents } from "./agentsView.svelte";
 import { closeSettings } from "./settingsView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
 import { shells } from "./agents.svelte";
-import { cssHex } from "./theme.svelte";
+import { applyWorkspacePalette, cssHex, theme } from "./theme.svelte";
+import { paletteOverride, resolvePalette, type Palette } from "./palette";
 
 // A workspace is a named arrangement of panes and tabs, plus the folder its sidebar shows.
 // Each one is open in at most one window at a time (terminal views live in a window); its shells live in the
 // backend, so a closed or moved workspace's terminals keep running and re-attach when it's shown again.
 // Storage (localStorage, shared by all windows):
-//   "workspaces"  [{id, name}] in creation order; any window writes it (create / rename / delete)
+//   "workspaces"  [{id, name, palette?}] in creation order; any window writes it (create / rename / delete /
+//                 per-workspace palette). `palette` is that workspace's own colour scheme; absent = the global
+//                 palette (theme.svelte.ts) is its fallback.
 //   "ws:<id>"     {folder, root, focused, minimized?, drafts?}; written only by the window that has it open. drafts = unsaved
 //                 editor text (tab id -> text) carried while the workspace isn't shown in any window
 //   "win:<label>" {open, active}: a window's workspace tabs. Removed when the window is closed, kept on quit,
 //                 so on the next launch the main window reopens the others.
-type Meta = { id: string; name: string };
+type Meta = { id: string; name: string; palette?: Palette };
 type Layout = { folder: string; root: L.Split; focused: string; minimized?: L.Minimized[]; drafts?: Record<string, string> };
 type Win = { open: string[]; active: string };
 
 // Storage is read back defensively: anything malformed is dropped rather than breaking the window.
-const loadMeta = () => {
+const loadMeta = (): Meta[] => {
   const all = load<unknown>("workspaces", []);
-  return Array.isArray(all) ? all.filter((m): m is Meta => typeof m?.id === "string" && typeof m?.name === "string") : [];
+  if (!Array.isArray(all)) return [];
+  return all.flatMap((m): Meta[] => {
+    if (!m || typeof m !== "object") return [];
+    const { id, name, palette } = m as Partial<Meta>;
+    if (typeof id !== "string" || typeof name !== "string") return [];
+    const own = paletteOverride(palette);
+    return [own ? { id, name, palette: own } : { id, name }];
+  });
 };
 function loadLayout(id: string): Layout | null {
   const l = load<Partial<Layout> | null>("ws:" + id, null);
@@ -63,6 +73,22 @@ const saveMeta = () => store.set("workspaces", JSON.stringify(ws.all));
 const snapshot = (): Layout => ({ folder: app.workspace, root: app.root, focused: app.focused, minimized: app.minimized });
 const tabsOf = (l: Layout) => [...L.panes(l.root).flatMap((p) => p.tabs), ...(l.minimized ?? []).map((m) => m.tab)];
 export const nameOf = (id: string) => ws.all.find((m) => m.id === id)?.name ?? "";
+
+/** Workspace `id`'s own palette, or undefined when it follows the global palette. */
+export const paletteOf = (id: string): Palette | undefined => paletteOverride(ws.all.find((m) => m.id === id)?.palette);
+
+/** The palette workspace `id` is shown in: its own, else the global fallback. */
+export const effectivePaletteOf = (id: string): Palette => resolvePalette(paletteOf(id), theme.globalPalette);
+
+/** Give workspace `id` its own palette, or clear it (null) so it follows the global palette again. */
+export function setWorkspacePalette(id: string, palette: Palette | null) {
+  const m = ws.all.find((m) => m.id === id);
+  if (!m) return;
+  if (palette) m.palette = palette;
+  else delete m.palette;
+  saveMeta();
+  if (id === ws.active) applyWorkspacePalette(palette);
+}
 
 // This window is going away (closed, reloaded, quitting) and has put its workspaces in storage with their unsaved
 // edits (parkAll): from here on nothing may overwrite that.
@@ -98,6 +124,7 @@ export function activate(id: string) {
   app.focused = l.focused;
   if (l.folder) openWorkspace(l.folder); // also seeds a terminal into an empty layout
   else app.workspace = "";
+  applyWorkspacePalette(paletteOf(id) ?? null); // this workspace's own palette, else the global fallback
   win.setTitle(nameOf(id));
 }
 
@@ -255,9 +282,9 @@ export async function openInNewWindow(id: string) {
     const scale = await win.scaleFactor();
     const size = (await win.innerSize()).toLogical(scale);
     const here = (await win.outerPosition()).toLogical(scale);
-    newWindow(label, { x: here.x + 40, y: here.y + 40, width: Math.max(size.width, 800), height: Math.max(size.height, 500) });
+    newWindow(label, { x: here.x + 40, y: here.y + 40, width: Math.max(size.width, 800), height: Math.max(size.height, 500) }, true, id);
   } catch (e) {
-    newWindow(label, { width: 1400, height: 900 });
+    newWindow(label, { width: 1400, height: 900 }, true, id);
     message(`Couldn't place the new window: ${e}`, { kind: "warning" });
   }
 }
@@ -278,7 +305,7 @@ export async function tearOut(id: string, grab: { x: number; y: number }) {
     release(id);
     label = "w-" + L.uid().slice(0, 8);
     store.set("win:" + label, JSON.stringify({ open: [id], active: id } satisfies Win));
-    newWindow(label, { x: (c.x - dx) / scale, y: (c.y - dy) / scale, width: size.width, height: size.height, focus: false }, false);
+    newWindow(label, { x: (c.x - dx) / scale, y: (c.y - dy) / scale, width: size.width, height: size.height, focus: false }, false, id);
   }
   invoke("follow_cursor", { label, id, source: win.label, dx, dy });
 }
@@ -312,9 +339,20 @@ async function mergeInto(target: string) {
 
 /** Open a window for `label`. It starts hidden and the backend shows it (`show`: right away; else follow_cursor does,
  * for a tear-off): created visible while the app is in full screen, it would hang the app (see show_window). */
-function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }, show = true) {
-  // Background = the theme's surface (as in Terminal.svelte), so a torn-off window doesn't flash white while loading.
-  const backgroundColor = cssHex("--surface").slice(0, 7);
+function newWindow(label: string, opts: { x?: number; y?: number; width: number; height: number; focus?: boolean }, show = true, forId?: string) {
+  // Background = the surface of the palette the new window will show (its workspace's own, else the global),
+  // so a torn-off window doesn't flash white (or another workspace's colour) while loading.
+  const pal = forId ? effectivePaletteOf(forId) : theme.palette;
+  const el = document.createElement("div");
+  el.dataset.palette = pal;
+  el.hidden = true;
+  document.documentElement.appendChild(el);
+  let backgroundColor: string;
+  try {
+    backgroundColor = cssHex("--surface", el).slice(0, 7);
+  } finally {
+    el.remove();
+  }
   const w = new WebviewWindow(label, {
     url: "/", title: "Pretorium", dragDropEnabled: false, focus: true, backgroundColor,
     // Same chrome as the main window (tauri.conf.json): the top bar is the title bar
@@ -444,8 +482,12 @@ function init() {
   const merge = store.get("merge:" + win.label);
   if (merge) mergeInto(merge);
 
-  // Names and deletions made in other windows.
-  window.addEventListener("storage", (e) => e.key === "workspaces" && (ws.all = loadMeta()));
+  // Names, deletions and palette changes made in other windows.
+  window.addEventListener("storage", (e) => {
+    if (e.key !== "workspaces") return;
+    ws.all = loadMeta();
+    if (ws.active) applyWorkspacePalette(paletteOf(ws.active) ?? null);
+  });
 
   // Closing a window gives its workspaces back, unsaved edits included; the last window's are kept to reopen on
   // launch (closing it quits, so it asks about working agents first).
@@ -466,6 +508,6 @@ function init() {
       const k = localStorage.key(i)!;
       if (!k.startsWith("win:") || k === "win:main") continue;
       const label = k.slice(4);
-      WebviewWindow.getByLabel(label).then((existing) => existing || newWindow(label, { width: 1400, height: 900 }));
+      WebviewWindow.getByLabel(label).then((existing) => existing || newWindow(label, { width: 1400, height: 900 }, true, loadWin(k)?.active || undefined));
     }
 }

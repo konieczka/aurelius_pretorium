@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Check, Monitor, Moon, Sun, X } from "@lucide/svelte";
   import { closeSettings } from "./settingsView.svelte";
-  import { PALETTES, setMode, setPalette, theme, type Mode } from "./theme.svelte";
+  import { PALETTES, setMode, setPalette, theme, type Mode, type Palette } from "./theme.svelte";
+  import { paletteName } from "./palette";
+  import { effectivePaletteOf, paletteOf, setWorkspacePalette, ws } from "./workspaces.svelte";
 
   const modes: { id: Mode; label: string; icon: typeof Sun }[] = [
     { id: "light", label: "Light", icon: Sun },
@@ -39,10 +41,11 @@
     </section>
 
     <section>
-      <h2>Palette</h2>
-      <div class="palettes" role="radiogroup" aria-label="Palette">
+      <h2>Palette — global default</h2>
+      <p class="hint top">The fallback for every workspace. A workspace with its own palette (below) keeps that one in its window.</p>
+      <div class="palettes" role="radiogroup" aria-label="Global palette">
         {#each PALETTES as p (p.id)}
-          <button class="palette" class:on={theme.palette === p.id} role="radio" aria-checked={theme.palette === p.id} onclick={() => setPalette(p.id)}>
+          <button class="palette" class:on={theme.globalPalette === p.id} role="radio" aria-checked={theme.globalPalette === p.id} onclick={() => setPalette(p.id)}>
             <!-- A tiny Pretorium in this palette (and the current mode): its variables apply from data-palette down -->
             <div class="preview" data-palette={p.id} aria-hidden="true">
               <div class="mini-bar"><i class="lamp"></i><i class="chip"></i><i class="chip short"></i></div>
@@ -58,8 +61,34 @@
               <span class="name">{p.name}{#if p.id === "aurelius"}<span class="default">Default</span>{/if}</span>
               <span class="blurb">{p.blurb}</span>
             </div>
-            {#if theme.palette === p.id}<span class="check"><Check size={12} strokeWidth={2.5} /></span>{/if}
+            {#if theme.globalPalette === p.id}<span class="check"><Check size={12} strokeWidth={2.5} /></span>{/if}
           </button>
+        {/each}
+      </div>
+    </section>
+
+    <section>
+      <h2>Workspace palettes</h2>
+      <p class="hint top">Give a workspace its own colour scheme, or leave it on the global default. It applies in the window showing that workspace; other windows keep theirs. You can also right-click a workspace tab and choose “Palette…”.</p>
+      <div class="ws-list">
+        {#each ws.all as m (m.id)}
+          {@const own = paletteOf(m.id)}
+          {@const effective = effectivePaletteOf(m.id)}
+          <div class="ws-row" class:active={m.id === ws.active}>
+            <span class="dot" data-palette={effective} aria-hidden="true"></span>
+            <span class="ws-name">{m.name}{#if m.id === ws.active}<span class="default">This window</span>{/if}</span>
+            <span class="ws-state">{own ? paletteName(own) : `Global · ${paletteName(theme.globalPalette)}`}</span>
+            <select
+              aria-label="Palette for {m.name}"
+              value={own ?? ""}
+              onchange={(e) => setWorkspacePalette(m.id, e.currentTarget.value === "" ? null : (e.currentTarget.value as Palette))}
+            >
+              <option value="">Use global ({paletteName(theme.globalPalette)})</option>
+              {#each PALETTES as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+            </select>
+          </div>
+        {:else}
+          <p class="hint">No workspaces yet.</p>
         {/each}
       </div>
     </section>
@@ -113,6 +142,64 @@
     margin: 10px 0 0;
     color: var(--muted-foreground);
     font-size: 12px;
+  }
+  .hint.top {
+    margin: -4px 0 12px;
+  }
+  .ws-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .ws-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--hover);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent);
+  }
+  .ws-row.active {
+    box-shadow: inset 0 0 0 1px var(--gold-ring);
+  }
+  .dot {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: var(--gold);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--gold) 45%, transparent), 0 0 8px color-mix(in oklch, var(--gold) 55%, transparent);
+  }
+  .ws-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13.5px;
+    font-weight: 550;
+  }
+  .ws-state {
+    margin-left: auto;
+    flex: none;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
+  .ws-row select {
+    flex: none;
+    max-width: 220px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--foreground);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
   }
 
   /* Segmented control, like the sidebar's Files / Changes */

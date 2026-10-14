@@ -543,3 +543,56 @@ html[data-palette="vesuvius"],
   --gold-ring: oklch(0.75 0.17 38);
   --gold-soft: oklch(0.72 0.18 38 / 20%);
 }
+
+/* Animate inherited tokens on the root, so surfaces, gradients, shadows and canvas
+   terminals share the same colours without overriding component hover transitions. */
+@property --background { syntax: "<color>"; inherits: true; initial-value: oklch(0.99 0.015 80 / 90%); }
+@property --surface { syntax: "<color>"; inherits: true; initial-value: oklch(0.985 0.016 80); }
+@property --foreground { syntax: "<color>"; inherits: true; initial-value: oklch(0.18 0.01 75); }
+@property --card { syntax: "<color>"; inherits: true; initial-value: oklch(0.995 0.012 82 / 85%); }
+@property --popover { syntax: "<color>"; inherits: true; initial-value: oklch(0.995 0.012 82 / 95%); }
+@property --primary { syntax: "<color>"; inherits: true; initial-value: oklch(0.25 0.02 75); }
+@property --primary-foreground { syntax: "<color>"; inherits: true; initial-value: oklch(0.98 0.01 80); }
+@property --secondary { syntax: "<color>"; inherits: true; initial-value: oklch(0.96 0.018 78 / 85%); }
+@property --muted { syntax: "<color>"; inherits: true; initial-value: oklch(0.96 0.018 78 / 80%); }
+@property --muted-foreground { syntax: "<color>"; inherits: true; initial-value: oklch(0.5 0.015 75); }
+@property --accent { syntax: "<color>"; inherits: true; initial-value: oklch(0.96 0.022 80 / 85%); }
+@property --accent-foreground { syntax: "<color>"; inherits: true; initial-value: oklch(0.25 0.02 75); }
+@property --border { syntax: "<color>"; inherits: true; initial-value: oklch(0.8 0.025 76 / 72%); }
+@property --border-strong { syntax: "<color>"; inherits: true; initial-value: oklch(0.68 0.032 74 / 85%); }
+@property --input { syntax: "<color>"; inherits: true; initial-value: oklch(0.9 0.015 80 / 70%); }
+@property --sidebar { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.02 82 / 88%); }
+@property --sidebar-foreground { syntax: "<color>"; inherits: true; initial-value: oklch(0.18 0.01 75); }
+@property --sidebar-accent { syntax: "<color>"; inherits: true; initial-value: oklch(0.94 0.022 78 / 85%); }
+@property --sidebar-border { syntax: "<color>"; inherits: true; initial-value: oklch(0.88 0.02 78 / 50%); }
+@property --scrollbar-thumb { syntax: "<color>"; inherits: true; initial-value: oklch(0.78 0.02 78 / 50%); }
+@property --scrollbar-thumb-hover { syntax: "<color>"; inherits: true; initial-value: oklch(0.65 0.025 78 / 70%); }
+@property --chrome { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.02 82 / 55%); }
+@property --chrome-edge { syntax: "<color>"; inherits: true; initial-value: oklch(1 0 0 / 65%); }
+@property --slab-head { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.019 80); }
+@property --float { syntax: "<color>"; inherits: true; initial-value: oklch(0.995 0.012 82 / 72%); }
+@property --faint { syntax: "<color>"; inherits: true; initial-value: oklch(0.63 0.015 75); }
+@property --hover { syntax: "<color>"; inherits: true; initial-value: oklch(0.25 0.02 75 / 6%); }
+@property --chip-on { syntax: "<color>"; inherits: true; initial-value: oklch(1 0.008 82 / 95%); }
+@property --hl { syntax: "<color>"; inherits: true; initial-value: oklch(1 0 0 / 85%); }
+@property --scrim { syntax: "<color>"; inherits: true; initial-value: oklch(0.28 0.03 70 / 12%); }
+@property --fi-folder { syntax: "<color>"; inherits: true; initial-value: oklch(0.66 0.11 80); }
+@property --gradient-from { syntax: "<color>"; inherits: true; initial-value: oklch(0.955 0.022 85); }
+@property --gradient-to { syntax: "<color>"; inherits: true; initial-value: oklch(0.912 0.03 72); }
+@property --glow-a { syntax: "<color>"; inherits: true; initial-value: oklch(0.99 0.03 85 / 70%); }
+@property --glow-b { syntax: "<color>"; inherits: true; initial-value: oklch(0.86 0.06 70 / 40%); }
+@property --glow-c { syntax: "<color>"; inherits: true; initial-value: oklch(0.97 0.025 80 / 55%); }
+@property --gold { syntax: "<color>"; inherits: true; initial-value: oklch(0.66 0.145 85); }
+@property --gold-ring { syntax: "<color>"; inherits: true; initial-value: oklch(0.555 0.12 82); }
+@property --gold-soft { syntax: "<color>"; inherits: true; initial-value: oklch(0.66 0.145 85 / 16%); }
+@property --shadow-tint { syntax: "<number>+"; inherits: true; initial-value: 0.28 0.03 70; }
+
+html.palette-anim {
+  transition-property: --background, --surface, --foreground, --card, --popover, --primary, --primary-foreground, --secondary, --muted, --muted-foreground, --accent, --accent-foreground, --border, --border-strong, --input, --sidebar, --sidebar-foreground, --sidebar-accent, --sidebar-border, --scrollbar-thumb, --scrollbar-thumb-hover, --chrome, --chrome-edge, --slab-head, --float, --faint, --hover, --chip-on, --hl, --scrim, --fi-folder, --gradient-from, --gradient-to, --glow-a, --glow-b, --glow-c, --gold, --gold-ring, --gold-soft, --shadow-tint;
+  transition-duration: var(--palette-duration, 380ms);
+  transition-timing-function: ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.palette-anim { transition: none; }
+}
