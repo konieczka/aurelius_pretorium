@@ -16,3 +16,7 @@ vite.config.ts.timestamp-*
 # Tauri updater / code-signing private keys
 *.key
 *.pem
+
+# Misc
+pretorium.key
+workplan.md
