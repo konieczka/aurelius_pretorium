@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
 mod agent_config;
+mod mcp;
 mod skills;
 mod status;
 mod usage;
@@ -1174,7 +1175,7 @@ pub fn run() {
         .manage(web::Views::default())
         .manage(Awake::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
             web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused
         ])
         .run(tauri::generate_context!())
