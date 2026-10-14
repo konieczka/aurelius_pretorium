@@ -26,20 +26,32 @@
 
   /** Keeps status fresh (badge + panel). ponytail: polling, not a file watcher; fine for one repo. */
   export function watchGit() {
+    // New workspace: forget the last one's repo, so nothing (a quick branch switch) runs against it meanwhile.
+    Object.assign(git, { root: "", status: null, deco: emptyDeco(), loaded: false, op: "", opInfo: "" });
+    lastRaw = "";
     refreshGit();
     const t = setInterval(() => document.hasFocus() && refreshGit(), 3000);
     window.addEventListener("focus", refreshGit);
     return () => (clearInterval(t), window.removeEventListener("focus", refreshGit));
   }
 
+  // Refreshes overlap (poll, focus, before and after each op): only the latest one started may write its result,
+  // else a slow one finishing last shows an old branch, or the previous workspace's repo.
+  let refreshes = 0;
+
   export async function refreshGit() {
-    if (!app.workspace) return;
+    const ws = app.workspace;
+    if (!ws) return;
+    const seq = ++refreshes;
+    const stale = () => seq !== refreshes || ws !== app.workspace;
     try {
-      const [root, gitDir] = (await invoke<string>("git", { cwd: app.workspace, args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"] })).trim().split("\n");
+      const [root, gitDir] = (await invoke<string>("git", { cwd: ws, args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"] })).trim().split("\n");
+      const raw = await invoke<string>("git", { cwd: root, args: ["status", "--porcelain=v2", "-z", "--branch", "--ignored=matching"] });
+      const op = await detectOp(gitDir);
+      if (stale()) return;
       git.root = root;
-      const raw = await run(["status", "--porcelain=v2", "-z", "--branch", "--ignored=matching"]);
       git.status = parseStatus(raw);
-      await detectOp(gitDir);
+      [git.op, git.opInfo] = op;
       // Status changed (e.g. an agent edited files): open diffs refetch, the tree picks up new files and recolors.
       if (raw !== lastRaw) {
         lastRaw = raw;
@@ -48,6 +60,7 @@
         app.treeVersion++;
       }
     } catch {
+      if (stale()) return;
       git.root = "";
       git.status = null;
       if (lastRaw) (lastRaw = ""), (git.deco = emptyDeco());
@@ -63,13 +76,13 @@
   }
 
   /** Merge / rebase / cherry-pick in progress? Read from the (per-worktree) git dir; missing files = not in progress. */
-  async function detectOp(gitDir: string) {
+  async function detectOp(gitDir: string): Promise<[typeof git.op, string]> {
     const read = (f: string) => invoke<string>("read_file", { path: `${gitDir}/${f}` }).then((t) => t.trim(), () => "");
     const [merge, rebaseHead, onto, msgnum, end, pick] = await Promise.all(
       ["MERGE_MSG", "rebase-merge/head-name", "rebase-merge/onto", "rebase-merge/msgnum", "rebase-merge/end", "CHERRY_PICK_HEAD"].map(read),
     );
     const mergeHead = merge && (await read("MERGE_HEAD"));
-    [git.op, git.opInfo] = rebaseHead
+    return rebaseHead
       ? ["rebase", `Rebasing ${rebaseHead.replace("refs/heads/", "")} onto ${onto.slice(0, 7)}${end ? ` (${msgnum}/${end})` : ""}`]
       : mergeHead
         ? ["merge", merge.split("\n")[0]]
@@ -184,20 +197,23 @@
   }
 
   export async function switchBranch() {
-    const refs = (await run(["for-each-ref", "--sort=-committerdate", "--format=%(refname)%09%(objectname:short)%09%(contents:subject)", "refs/heads", "refs/remotes"]).catch(() => ""))
+    const fmt = "%(refname)%09%(objectname:short)%09%(worktreepath)%09%(contents:subject)";
+    const refs = (await run(["for-each-ref", "--sort=-committerdate", `--format=${fmt}`, "refs/heads", "refs/remotes"]).catch(() => ""))
       .split("\n")
       .filter((l) => l && !l.split("\t")[0].endsWith("/HEAD"))
       .map((l) => {
-        const [ref, sha, subject] = l.split("\t");
-        return { ref, name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote: ref.startsWith("refs/remotes/"), sha, subject };
+        const [ref, sha, wt, ...subject] = l.split("\t");
+        return { ref, name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote: ref.startsWith("refs/remotes/"), sha, wt, subject: subject.join("\t") };
       });
+    // A branch can be checked out in one worktree only: `git switch` to one checked out in another fails, so open that one.
+    const elsewhere = new Map(refs.filter((r) => !r.remote && r.wt && r.wt !== git.root).map((r) => [r.name, r.wt]));
     const locals = new Set(refs.filter((r) => !r.remote).map((r) => r.name));
     const v = await pick("Select a branch to switch to", [
       { label: "+ Create new branch…", value: "\0new" },
       ...refs.map((r) => ({
         label: r.name,
         detail: `${r.sha} · ${r.subject}`,
-        hint: r.name === git.status?.head ? "current" : r.remote ? "remote" : "",
+        hint: r.name === git.status?.head ? "current" : elsewhere.has(r.name) ? `in worktree ${base(elsewhere.get(r.name)!)}` : r.remote ? "remote" : "",
         value: r.ref,
       })),
     ]);
@@ -208,17 +224,20 @@
       return;
     }
     const r = refs.find((x) => x.ref === v)!;
-    if (!r.remote) return op(["switch", r.name]);
     // Remote branch: switch to its local counterpart, creating a tracking branch if needed.
-    const local = r.name.slice(r.name.indexOf("/") + 1);
-    await op(locals.has(local) ? ["switch", local] : ["switch", "-c", local, "--track", r.name]);
+    const local = r.remote ? r.name.slice(r.name.indexOf("/") + 1) : r.name;
+    const wt = elsewhere.get(local);
+    if (wt) {
+      if (await ask(`"${local}" is checked out in the worktree at ${wt}. Open that worktree?`)) goTo(wt);
+      return;
+    }
+    await op(!r.remote || locals.has(local) ? ["switch", local] : ["switch", "-c", local, "--track", r.name]);
   }
 
+  const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+
   /** Each worktree is its own workspace (own layout); the one we leave keeps running in the background. */
-  function goTo(path: string) {
-    git.loaded = false;
-    openWorkspace(path);
-  }
+  const goTo = (path: string) => openWorkspace(path);
 
   export async function switchWorktree() {
     const wts = (await run(["worktree", "list", "--porcelain"]).catch(() => ""))
@@ -233,7 +252,7 @@
     const v = await pick("Select a worktree to open", [
       { label: "+ Create new worktree…", value: "\0new" },
       ...wts.map((w, i) => ({
-        label: w.path.slice(w.path.lastIndexOf("/") + 1),
+        label: base(w.path),
         detail: `${w.branch} · ${w.path}`,
         hint: w.path === git.root ? "current" : i === 0 ? "main" : "",
         value: w.path,
