@@ -12,6 +12,7 @@ mod skills;
 mod status;
 mod usage;
 mod web;
+mod workdir;
 
 struct Session {
     // Input for the shell, written by its own thread: a write blocks while the program in the terminal isn't
@@ -20,8 +21,10 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     out: Arc<Mutex<Output>>,
-    cwd: String, // where it is: starts as the tab's folder, follows `cd` (see `cwd_of`)
+    cwd: String, // where it is: starts as the tab's folder, follows `cd` (see `cwd_of`), or its agent's work
     watch: status::Watch,
+    work: workdir::Work, // where its agent's commands run
+    moved: Option<String>, // where its agent's own process last was, when not where the shell is
 }
 
 /// Where a shell's output goes, plus its recent output so a window that (re)attaches can replay it.
@@ -207,7 +210,7 @@ fn pty_open(
         }
     });
 
-    sessions.insert(id, Session { input, master: pair.master, child, out, cwd, watch: Default::default() });
+    sessions.insert(id, Session { input, master: pair.master, child, out, cwd, watch: Default::default(), work: Default::default(), moved: None });
     Ok(true)
 }
 
@@ -355,7 +358,14 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
         let shell = s.child.process_id().and_then(cwd_of);
         let agent = agents.get(id);
         let moved = agent.and_then(|(_, pids)| pids.iter().filter_map(|&p| cwd_of(p)).find(|c| Some(c) != shell.as_ref()));
-        if let Some(cwd) = moved.or(shell) {
+        s.work.set_agents(agent.map(|(_, pids)| pids.clone()).unwrap_or_default());
+        // The agent moving itself is newer than any command it ran before.
+        if moved != s.moved {
+            s.moved = moved.clone();
+            s.work.dir = None;
+        }
+        // Then where its latest command ran: that's where it works, though the agent itself stays put.
+        if let Some(cwd) = s.work.dir.clone().or(moved).or(shell) {
             s.cwd = cwd;
         }
         let mut o = s.out.lock().unwrap();
@@ -389,6 +399,17 @@ async fn pty_status(ptys: State<'_, Ptys>, seen: Vec<String>, app: AppHandle) ->
         let _ = app.emit("agent-cue", c);
     }
     Ok(shells)
+}
+
+/// Samples where each agent's commands run (see `workdir`), more often than `pty_status` is polled: most commands
+/// are over in well under a second.
+fn watch_work(app: &AppHandle) {
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        for s in app.state::<Ptys>().sessions.lock().unwrap().values_mut() {
+            s.work.sample();
+        }
+    }
 }
 
 /// Sound Cues: a sound when an agent asks something (approval, a question) and another when it finishes its turn,
@@ -1142,6 +1163,8 @@ pub fn run() {
         .setup(|app| {
             let h = app.handle().clone();
             std::thread::spawn(move || flush_holding(&h));
+            let h = app.handle().clone();
+            std::thread::spawn(move || watch_work(&h));
             Ok(())
         })
         .manage(Ptys::default())
