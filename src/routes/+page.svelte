@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw, Server } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw, Rows2, Server, Columns2, UnfoldHorizontal } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
@@ -35,6 +35,7 @@
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
     app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
+    isShown, showMode, sidebarModes, toggleSidebarRows, toggleUnfold, type SidebarMode,
   } from "$lib/state.svelte";
 
   initWorkspaces();
@@ -55,6 +56,11 @@
   });
 
   // Agents that need you: asking something, or done (or rang) out of sight. Every shell, wherever its tab is.
+  const modeNames: Record<SidebarMode, string> = { fleet: "Fleet", files: "Files", git: "Source Control", infra: "Servers" };
+  // Unfolded side by side, the sidebar grows a column per view (up to most of the window; past that its views scroll)
+  const columns = $derived(app.unfolded && !app.sidebarRows ? sidebarModes().length : 1);
+  const width = $derived(columns === 1 ? "264px" : `min(${264 * columns + columns - 1}px, 70vw)`);
+
   const waiting = $derived(Object.values(shells.all).filter((s) => s.agent && (s.asking || s.attention)).length);
 
   async function pickFolder() {
@@ -77,7 +83,7 @@
     // Typing into a pane hands ⌘Z back to it. Programmatic focus (a tab mounting) deliberately doesn't.
     if (!e.metaKey && !e.ctrlKey && (e.target as Element).closest?.("main")) app.treeFocused = false;
     // Tree undo/delete/cut/copy/paste only when the sidebar has focus; otherwise ⌘Z belongs to the editor/terminal.
-    if (app.treeFocused && app.sidebar === "files" && !(e.target as Element).closest?.("input, textarea") && (e.metaKey || e.ctrlKey) && !e.shiftKey && ["z", "x", "c", "v", "backspace"].includes(k)) {
+    if (app.treeFocused && isShown("files") && !(e.target as Element).closest?.("input, textarea") && (e.metaKey || e.ctrlKey) && !e.shiftKey && ["z", "x", "c", "v", "backspace"].includes(k)) {
       const p = app.selectedPath;
       const act =
         k === "z" ? undoTree :
@@ -99,8 +105,8 @@
       k === "o" ? pickFolder :
       k === "p" ? switchFolder :
       !app.workspace ? null :
-      k === "e" && e.shiftKey ? () => (app.sidebar = "files") :
-      k === "g" && e.shiftKey ? () => (app.sidebar = "git") :
+      k === "e" && e.shiftKey ? () => showMode("files", false, true) :
+      k === "g" && e.shiftKey ? () => showMode("git", false, true) :
       k === "b" && !e.shiftKey ? toggleSidebar :
       k === "u" && e.shiftKey ? toggleUsage :
       k === "w" && usage.open ? closeUsage :
@@ -135,80 +141,105 @@
 
 <svelte:window onkeydowncapture={onKey} />
 
+{#snippet actions(m: SidebarMode)}
+  {#if m === "files"}
+    <button class="icon-btn" onclick={() => startCreate("file")} title="New file"><FilePlus size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={() => startCreate("dir")} title="New folder"><FolderPlus size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
+  {:else if m === "fleet"}
+    <NewAgent review />
+    <NewAgent />
+  {:else if m === "git" && git.root}
+    <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={pull} disabled={!!git.busy} title="Pull"><ArrowDown size={14} strokeWidth={1.5} /></button>
+    <button class="icon-btn" onclick={push} disabled={!!git.busy} title="Push"><ArrowUp size={14} strokeWidth={1.5} /></button>
+  {:else if m === "infra"}
+    <button class="icon-btn" class:on={infra.all} aria-pressed={infra.all} onclick={() => (infra.all = !infra.all)} title={infra.all ? "Hide the system's and apps' ports" : "Show the system's and apps' ports too"}>
+      {#if infra.all}<EyeOff size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
+    </button>
+    <button class="icon-btn" onclick={refreshInfra} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
+  {/if}
+{/snippet}
+
+{#snippet body(m: SidebarMode)}
+  {#if m === "files"}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="tree"
+      class:drop={app.dropDir === app.workspace}
+      onclick={(e) => e.target === e.currentTarget && (app.selectedDir = app.workspace)}
+      oncontextmenu={(e) => treeMenu(e, app.workspace, true)}
+      onkeydown={() => {}}
+      ondragover={(e) => {
+        if (!e.dataTransfer?.types.includes("text/x-path")) return;
+        e.preventDefault();
+        app.dropDir = app.workspace;
+      }}
+      ondragleave={(e) => e.target === e.currentTarget && (app.dropDir = "")}
+      ondrop={(e) => {
+        const from = e.dataTransfer?.getData("text/x-path");
+        app.dropDir = "";
+        if (from) moveInto(from, app.workspace);
+      }}
+    >
+      {#key app.workspace}<FileTree path={app.workspace} />{/key}
+    </div>
+  {:else if m === "git"}
+    <div class="tree"><GitPanel /></div>
+  {:else if m === "infra"}
+    <div class="tree"><Infra /></div>
+  {:else}
+    <div class="tree"><Fleet /></div>
+  {/if}
+{/snippet}
+
 {#if app.workspace}
-  <div class="app" class:collapsed={!app.sidebarOpen}>
+  <div class="app" class:collapsed={!app.sidebarOpen} style:--sidebar-width={width}>
     <WorkspaceBar />
     <aside class="glass" inert={!app.sidebarOpen} onpointerdown={() => (app.treeFocused = true)}>
       <header>
         <button class="ws" onclick={switchFolder} title="{app.workspace} (⌘P to switch)">
           <FolderRoot size={14} strokeWidth={1.5} /><span class="name">{app.workspace.split("/").pop()}</span><ChevronsUpDown size={13} strokeWidth={1.5} />
         </button>
+        {#if app.unfolded && sidebarModes().length > 1}
+          <button class="icon-btn" onclick={toggleSidebarRows} title={app.sidebarRows ? "Lay the views side by side" : "Stack the views"}>
+            {#if app.sidebarRows}<Columns2 size={14} strokeWidth={1.5} />{:else}<Rows2 size={14} strokeWidth={1.5} />{/if}
+          </button>
+        {/if}
+        <button class="icon-btn" class:on={app.unfolded} aria-pressed={app.unfolded} onclick={toggleUnfold} title={app.unfolded ? "Show one view at a time" : "Unfold: show several views at once (or ⌘-click a view)"}>
+          <UnfoldHorizontal size={14} strokeWidth={1.5} />
+        </button>
       </header>
       <div class="toolbar">
         <div class="modes" role="tablist">
-          <button class="icon-btn mode" class:on={app.sidebar === "fleet"} role="tab" aria-selected={app.sidebar === "fleet"} onclick={() => (app.sidebar = "fleet")} title="Fleet: every agent, in every workspace (⇧⌘J)">
+          <button class="icon-btn mode" class:on={isShown("fleet")} role="tab" aria-selected={isShown("fleet")} onclick={(e) => showMode("fleet", e.metaKey)} title="Fleet: every agent, in every workspace (⇧⌘J; ⌘-click to show it beside the others)">
             <GalleyIcon size={15} />
             {#if waiting}<span class="badge hot" title="{waiting} need{waiting === 1 ? 's' : ''} you">{waiting}</span>{/if}
           </button>
-          <button class="icon-btn mode" class:on={app.sidebar === "files"} role="tab" aria-selected={app.sidebar === "files"} onclick={() => (app.sidebar = "files")} title="Files (⇧⌘E)"><Files size={15} strokeWidth={1.5} /></button>
-          <button class="icon-btn mode" class:on={app.sidebar === "git"} role="tab" aria-selected={app.sidebar === "git"} onclick={() => (app.sidebar = "git")} title="Source Control (⇧⌘G)">
+          <button class="icon-btn mode" class:on={isShown("files")} role="tab" aria-selected={isShown("files")} onclick={(e) => showMode("files", e.metaKey)} title="Files (⇧⌘E)"><Files size={15} strokeWidth={1.5} /></button>
+          <button class="icon-btn mode" class:on={isShown("git")} role="tab" aria-selected={isShown("git")} onclick={(e) => showMode("git", e.metaKey)} title="Source Control (⇧⌘G)">
             <GitBranch size={15} strokeWidth={1.5} />
             {#if changeCount()}<span class="badge">{changeCount()}</span>{/if}
           </button>
-          <button class="icon-btn mode" class:on={app.sidebar === "infra"} role="tab" aria-selected={app.sidebar === "infra"} onclick={() => (app.sidebar = "infra")} title="Servers: dev servers, databases and containers on this Mac">
+          <button class="icon-btn mode" class:on={isShown("infra")} role="tab" aria-selected={isShown("infra")} onclick={(e) => showMode("infra", e.metaKey)} title="Servers: dev servers, databases and containers on this Mac">
             <Server size={15} strokeWidth={1.5} />
             {#if serverCount()}<span class="badge" title="{serverCount()} running for this workspace">{serverCount()}</span>{/if}
           </button>
         </div>
         <span class="spacer"></span>
-        {#if app.sidebar === "files"}
-          <button class="icon-btn" onclick={() => startCreate("file")} title="New file"><FilePlus size={14} strokeWidth={1.5} /></button>
-          <button class="icon-btn" onclick={() => startCreate("dir")} title="New folder"><FolderPlus size={14} strokeWidth={1.5} /></button>
-          <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
-          <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
-        {:else if app.sidebar === "fleet"}
-          <NewAgent review />
-          <NewAgent />
-        {:else if app.sidebar === "git" && git.root}
-          <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
-          <button class="icon-btn" onclick={pull} disabled={!!git.busy} title="Pull"><ArrowDown size={14} strokeWidth={1.5} /></button>
-          <button class="icon-btn" onclick={push} disabled={!!git.busy} title="Push"><ArrowUp size={14} strokeWidth={1.5} /></button>
-        {:else if app.sidebar === "infra"}
-          <button class="icon-btn" class:on={infra.all} aria-pressed={infra.all} onclick={() => (infra.all = !infra.all)} title={infra.all ? "Hide the system's and apps' ports" : "Show the system's and apps' ports too"}>
-            {#if infra.all}<EyeOff size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
-          </button>
-          <button class="icon-btn" onclick={refreshInfra} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
-        {/if}
+        {#if !app.unfolded}{@render actions(app.sidebar)}{/if}
       </div>
-      {#if app.sidebar === "files"}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="tree"
-          class:drop={app.dropDir === app.workspace}
-          onclick={(e) => e.target === e.currentTarget && (app.selectedDir = app.workspace)}
-          oncontextmenu={(e) => treeMenu(e, app.workspace, true)}
-          onkeydown={() => {}}
-          ondragover={(e) => {
-            if (!e.dataTransfer?.types.includes("text/x-path")) return;
-            e.preventDefault();
-            app.dropDir = app.workspace;
-          }}
-          ondragleave={(e) => e.target === e.currentTarget && (app.dropDir = "")}
-          ondrop={(e) => {
-            const from = e.dataTransfer?.getData("text/x-path");
-            app.dropDir = "";
-            if (from) moveInto(from, app.workspace);
-          }}
-        >
-          {#key app.workspace}<FileTree path={app.workspace} />{/key}
-        </div>
-      {:else if app.sidebar === "git"}
-        <div class="tree"><GitPanel /></div>
-      {:else if app.sidebar === "infra"}
-        <div class="tree"><Infra /></div>
-      {:else}
-        <div class="tree"><Fleet /></div>
-      {/if}
+      <div class="sections" class:rows={app.sidebarRows}>
+        {#each sidebarModes() as m (m)}
+          <section>
+            {#if app.unfolded}
+              <div class="section-head"><span class="label">{modeNames[m]}</span><span class="spacer"></span>{@render actions(m)}</div>
+            {/if}
+            {@render body(m)}
+          </section>
+        {/each}
+      </div>
     </aside>
     <!-- The Usage, Skills, MCP, Agents and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
     <main class:away={usage.open || skills.open || mcp.open || agents.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
@@ -266,6 +297,7 @@
   header {
     display: flex;
     align-items: center;
+    gap: 2px;
     flex: none;
     padding: 10px 10px 6px;
   }
@@ -333,6 +365,10 @@
     background: oklch(0.7 0.17 50);
     color: white;
   }
+  header > .icon-btn.on {
+    background: var(--hover);
+    color: var(--foreground);
+  }
   .ws {
     display: flex;
     align-items: center;
@@ -365,6 +401,50 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Unfolded: a column per view (or a row each), a hairline apart */
+  .sections {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow-x: auto;
+  }
+  .sections.rows {
+    flex-direction: column;
+  }
+  /* Columns share what the window can spare, down to a narrow minimum; past that the views scroll */
+  section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 264px;
+    min-width: 200px;
+    min-height: 0;
+  }
+  .sections.rows section {
+    flex: 1;
+    min-width: 0;
+  }
+  section + section {
+    border-left: 1px solid var(--border);
+  }
+  .sections.rows section + section {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    min-height: 26px;
+    padding: 4px 10px 2px 16px;
+  }
+  .section-head .label {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .tree {
     flex: 1;
