@@ -17,6 +17,10 @@
   /** Tab id -> its page's icon (a data: URL) and the origin it's for. Not saved: pages send it again as they load. */
   export const icons = $state<Record<string, { src: string; origin: string }>>({});
   const originOf = (url: string) => URL.parse(url)?.origin ?? "";
+  /** Tab id -> its site's saved logins (by user) and the origin they're for: sent when a page shows a password field. */
+  const logins = $state<Record<string, { origin: string; users: string[] }>>({});
+  /** Tab id -> a login its page just sent, for its toolbar to offer saving (or a saved user's new password). */
+  const asks = $state<Record<string, { origin: string; user: string; update: boolean }>>({});
   const inputs = new Map<string, HTMLInputElement>(); // tab id -> its address bar, while shown
 
   // Calls that place, hide or close a tab's view go one at a time, latest wins: dragging a split sends one per frame,
@@ -42,6 +46,8 @@
     delete loading[id];
     delete nav[id];
     delete icons[id];
+    delete logins[id];
+    delete asks[id];
   }
 
   export function focusAddress(id: string) {
@@ -63,6 +69,13 @@
     if (p.back !== undefined) nav[p.id] = { back: p.back, forward: !!p.forward };
     // Off to another site: its icon isn't this one (it sends its own once it has loaded)
     if (p.loading && icons[p.id] && originOf(p.url) !== icons[p.id].origin) delete icons[p.id];
+  });
+  // Saved logins (logins.rs): only for this Mac's own servers, by the tab's project and the port
+  listen<{ id: string; origin: string; users: string[] }>("web-logins", ({ payload: p }) => {
+    if (webTab(p.id)) logins[p.id] = { origin: p.origin, users: p.users };
+  });
+  listen<{ id: string; origin: string; user: string; update: boolean }>("web-login-ask", ({ payload: { id, ...ask } }) => {
+    if (webTab(id)) asks[id] = ask;
   });
   listen<{ id: string; url: string; icon: string | null }>("web-icon", ({ payload: p }) => {
     const t = webTab(p.id);
@@ -86,10 +99,10 @@
 </script>
 
 <script lang="ts">
-  import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw, X } from "@lucide/svelte";
+  import { ArrowLeft, ArrowRight, ExternalLink, Globe, KeyRound, RotateCw, X } from "@lucide/svelte";
   import { picking } from "./QuickPick.svelte";
   import { zoomLevel } from "./zoom";
-  import { toUrl } from "./web";
+  import { hostOf, toUrl } from "./web";
   import { untrack } from "svelte";
 
   let { tab }: { tab: WebTab } = $props();
@@ -127,10 +140,13 @@
       if (key === last) return;
       last = key;
       if (!shown) return void send(id, () => invoke("web_hide", { id }));
-      const args = { id, url: tab.url, x: r.left * z, y: r.top * z, width: r.width * z, height: r.height * z, radius: radius() * z };
+      // Opening its first page settles its project: whose cookies and logins
+      const where = { project: tab.project ?? null, folder: tab.folder ?? app.workspace };
+      const args = { id, url: tab.url, ...where, x: r.left * z, y: r.top * z, width: r.width * z, height: r.height * z, radius: radius() * z };
       send(id, () =>
-        invoke("web_show", args).then(
-          () => {
+        invoke<string | null>("web_show", args).then(
+          (project) => {
+            if (project !== null) (tab.project = project), (tab.folder = undefined);
             created = true;
             if (focusPage) (focusPage = false), invoke("web_focus", { id });
           },
@@ -168,6 +184,20 @@
     }
   }
 
+  // The site's saved logins, when the page has a password field (the key shows them to pick from or forget)
+  const saved = $derived(logins[id]?.origin === originOf(tab.url) ? logins[id].users : []);
+  let showLogins = $state(false);
+  $effect(() => {
+    if (!saved.length) showLogins = false;
+  });
+  const projectName = $derived(tab.project?.split("/").pop() || "");
+  const answer = (a: "save" | "never" | "dismiss") => {
+    delete asks[id];
+    invoke("web_login_answer", { id, answer: a }).catch(() => {});
+  };
+  const fill = (user: string) => invoke("web_login_fill", { id, user }).then(() => (showLogins = false), (e) => console.warn(e));
+  const forget = (user: string) => invoke("web_login_forget", { id, user }).catch(() => {});
+
   // A load that fails may never report finishing: Stop also clears it
   const reload = () => (loading[id] ? ((loading[id] = false), invoke("web_stop", { id })) : invoke("web_reload", { id })).catch(() => {});
 </script>
@@ -192,8 +222,38 @@
       onblur={() => (editing = false)}
       onkeydown={key}
     />
+    {#if saved.length}
+      <button class="icon-btn" class:on={showLogins} onclick={() => (showLogins = !showLogins)} title="Saved logins"><KeyRound size={13} strokeWidth={1.5} /></button>
+    {/if}
     <button class="icon-btn" onclick={() => invoke("open_url", { url: tab.url }).catch(() => {})} disabled={!/^https?:/.test(tab.url)} title="Open in your browser"><ExternalLink size={13} strokeWidth={1.5} /></button>
   </div>
+  <!-- Strips under the toolbar, not over the page: the page is a native view, above anything of ours in its place -->
+  {#if asks[id]}
+    {@const ask = asks[id]}
+    <div class="strip" role="alertdialog" aria-label="Save login">
+      <KeyRound size={13} strokeWidth={1.5} />
+      <span class="text">
+        {ask.update ? "Update the password for" : "Save the login for"} <strong>{ask.user || "this site"}</strong> on {hostOf(ask.origin)}{#if projectName}&nbsp;in {projectName}{/if}?
+      </span>
+      <button class="primary" onclick={() => answer("save")}>{ask.update ? "Update" : "Save"}</button>
+      {#if !ask.update}<button class="ghost" onclick={() => answer("never")}>Never for This Site</button>{/if}
+      <button class="icon-btn" onclick={() => answer("dismiss")} title="Not now" aria-label="Not now"><X size={13} strokeWidth={1.5} /></button>
+    </div>
+  {:else if showLogins}
+    <div class="strip">
+      <KeyRound size={13} strokeWidth={1.5} />
+      <span class="label">Fill in</span>
+      <span class="users">
+        {#each saved as user (user)}
+          <span class="user">
+            <button class="ghost" onclick={() => fill(user)}>{user || "No username"}</button>
+            <button class="icon-btn" onclick={() => forget(user)} title="Forget this login" aria-label="Forget {user}"><X size={11} strokeWidth={1.5} /></button>
+          </span>
+        {/each}
+      </span>
+      <span class="where">{hostOf(tab.url)}{#if projectName}&nbsp;· {projectName}{/if}</span>
+    </div>
+  {/if}
   <div class="view" bind:this={view}>
     {#if error}
       <p class="note">{error}</p>
@@ -223,6 +283,80 @@
   .toolbar > .icon-btn {
     width: 26px;
     height: 26px;
+  }
+  .toolbar > .icon-btn.on {
+    background: var(--hover);
+    color: var(--foreground);
+  }
+  .strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-height: 36px;
+    padding: 4px 8px 4px 12px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-left: 2px solid var(--gold);
+    background: var(--card);
+    font-size: 12.5px;
+  }
+  .strip > :global(svg) {
+    flex: none;
+    color: var(--muted-foreground);
+  }
+  .strip .text {
+    flex: 1;
+    min-width: 0;
+  }
+  .strip .label,
+  .strip .where {
+    flex: none;
+    color: var(--muted-foreground);
+  }
+  .strip .users {
+    display: flex;
+    flex-wrap: wrap;
+    flex: 1;
+    min-width: 0;
+    gap: 4px;
+  }
+  .strip .user {
+    display: inline-flex;
+    align-items: center;
+  }
+  .strip .user .icon-btn {
+    width: 20px;
+    height: 20px;
+  }
+  .ghost,
+  .primary {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ghost {
+    border: 1px solid var(--input);
+    background: var(--background);
+    color: var(--foreground);
+  }
+  .ghost:hover {
+    background: var(--accent);
+  }
+  .primary {
+    border: 0;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: var(--shadow-raised);
+    font-weight: 500;
+  }
+  .primary:hover {
+    opacity: 0.9;
   }
   .address {
     flex: 1;

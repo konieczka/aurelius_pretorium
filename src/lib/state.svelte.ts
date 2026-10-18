@@ -156,12 +156,14 @@ export function newNote() {
   p.active = p.tabs.length - 1;
 }
 
-/** Browser tab in the focused pane, or right after tab `after` in its pane. No `url`: its address bar waits for one. */
+/** Browser tab in the focused pane, or right after tab `after` in its pane. No `url`: its address bar waits for one.
+ * One opened from another (a link to a new window) shares its project: a sign-in popup must see its cookies. */
 export function openBrowser(url = "", after?: string) {
   closeViews();
   const at = after ? L.findTab(app.root, after) : null;
   const p = at?.pane ?? focusedPane();
-  const t: L.Tab = { id: L.uid(), kind: "web", url };
+  const from = at?.pane.tabs[at.index];
+  const t: L.Tab = { id: L.uid(), kind: "web", url, ...(from?.kind === "web" && from.project !== undefined ? { project: from.project } : {}) };
   p.tabs.splice(at ? at.index + 1 : p.tabs.length, 0, t);
   p.active = p.tabs.indexOf(t);
   app.focused = p.id;
@@ -173,7 +175,7 @@ export function openBrowserBeside(url: string, beside: string) {
   const at = L.findTab(app.root, beside);
   if (!at) return openBrowser(url);
   closeViews();
-  app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url }).id;
+  app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url, folder: tabOwner(at.pane.tabs[at.index]) || undefined }).id;
 }
 
 /** A database's tab: brought up if one is open for it, else opened in the focused pane. */

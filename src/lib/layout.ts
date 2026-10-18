@@ -7,8 +7,9 @@ export type Tab =
   | { id: string; kind: "file"; path: string; preview?: boolean; wrap?: boolean /* on unless false */ }
   // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree), or base -> ref
   | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string; base?: string }
-  // url "" = a new tab waiting for an address; title = the page's, last seen
-  | { id: string; kind: "web"; url: string; title?: string }
+  // url "" = a new tab waiting for an address; title = the page's, last seen. project: whose its pages are (their
+  // cookies and saved logins), settled when it first opens one ("" none); folder: the one it was opened from, until then
+  | { id: string; kind: "web"; url: string; title?: string; project?: string; folder?: string }
   // a database on this machine (see db/); name: what the tab says; write: statements may change data
   | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean };
 /** Where a database is: a server's port, a container (exec'd into without one), or a SQLite file. root: its project. */

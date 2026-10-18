@@ -1046,6 +1046,7 @@ name = "fleet_command"
 version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "csv",
  "futures-util",
  "jsonc-parser",
@@ -1054,6 +1055,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "objc2-web-kit",
  "portable-pty",
  "redis",
  "rusqlite",

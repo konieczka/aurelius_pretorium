@@ -74,6 +74,16 @@ pub(crate) async fn scan(shells: HashMap<u32, String>) -> Res<Scan> {
     .await
 }
 
+/// The project serving `port` on this Mac: the checkout of what listens on it, or of the Compose project whose container
+/// publishes it. None when nothing does, or it's no project's (a Homebrew service, an app).
+pub(crate) fn project_on(port: u16) -> Option<String> {
+    match listeners(&HashMap::new()).into_iter().find(|l| l.ports.contains(&port)) {
+        Some(l) if !l.root.is_empty() => Some(l.root),
+        // Docker's own ports are left out of the listeners, and OrbStack's count as an app's: their containers say
+        _ => containers().0.into_iter().find(|c| c.ports.iter().any(|p| p.host == port)).map(|c| c.root).filter(|r| !r.is_empty()),
+    }
+}
+
 fn listeners(shells: &HashMap<u32, String>) -> Vec<Listener> {
     let mut lsof = Command::new("/usr/sbin/lsof");
     lsof.args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());

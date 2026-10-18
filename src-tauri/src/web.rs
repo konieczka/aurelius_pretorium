@@ -327,9 +327,34 @@ fn round(wv: &Webview, radius: f64) {
     let _ = (wv, radius);
 }
 
+/// The project a tab opening `url` belongs to: on this Mac, the one serving it, else (the server isn't up yet) the folder
+/// it was opened from; elsewhere none, so sites signed in to once are signed in everywhere. Blocking.
+fn project_for(url: &Url, folder: String) -> String {
+    match crate::logins::local_port(url) {
+        Some(port) => crate::infra::project_on(port).unwrap_or(folder),
+        None => String::new(),
+    }
+}
+
+/// The cookies and storage for a project's tabs: a store of its own, so two projects on localhost (cookies don't go by
+/// port) don't sign each other out. None: the app's. Stores need macOS 14; before it every tab has the app's.
+fn data_store(project: &str) -> Option<[u8; 16]> {
+    if project.is_empty() {
+        return None;
+    }
+    // Two FNV-1a hashes of its path: the same project gets the same store across launches
+    let fnv = |seed: u64| project.bytes().fold(seed, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let mut id = [0; 16];
+    id[..8].copy_from_slice(&fnv(0xcbf29ce484222325).to_le_bytes());
+    id[8..].copy_from_slice(&fnv(0x6c62272e07bb0142).to_le_bytes());
+    Some(id)
+}
+
 /// Show tab `id`'s browser at x, y, width, height (logical px in the window), opening `url` in it if it isn't open yet.
+/// Opening it, the tab's `project` is settled (see project_for; `folder` is the one it was opened from) and returned;
+/// it's passed back after, for the tab to keep its project, and so its store, across launches.
 #[tauri::command]
-pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x: f64, y: f64, width: f64, height: f64, radius: f64) -> Res<()> {
+pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, project: Option<String>, folder: Option<String>, x: f64, y: f64, width: f64, height: f64, radius: f64) -> Res<Option<String>> {
     let (pos, size) = (LogicalPosition::new(x, y), LogicalSize::new(width.max(1.0), height.max(1.0)));
     if let Some(wv) = app.get_webview(&label(&id)) {
         if wv.window().label() != window.label() {
@@ -338,15 +363,25 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
         wv.set_bounds(tauri::Rect { position: pos.into(), size: size.into() }).map_err(err)?;
         wv.show().map_err(err)?;
         round(&wv, radius);
-        return Ok(());
+        return Ok(None);
     }
     let url: Url = url.parse().map_err(err)?;
     if !allow(&app, &url) {
         return Err(format!("can't open {url} here"));
     }
+    let project = match project {
+        Some(p) => p,
+        None => {
+            let (url, folder) = (url.clone(), folder.unwrap_or_default());
+            crate::blocking(move || Ok(project_for(&url, folder))).await?
+        }
+    };
+    if app.get_webview(&label(&id)).is_some() {
+        return Ok(None); // made while that ran (calls for a tab go one at a time, so not by this page)
+    }
     let (nav, opener) = (app.clone(), app.clone());
     let from = id.clone();
-    let builder = WebviewBuilder::new(label(&id), WebviewUrl::External(url))
+    let mut builder = WebviewBuilder::new(label(&id), WebviewUrl::External(url))
         .user_agent(USER_AGENT)
         .focused(false)
         .on_navigation(move |u| allow(&nav, u))
@@ -360,6 +395,7 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
             emit_state(&wv, p.url(), None, Some(started));
             if !started {
                 find_icon(&wv);
+                crate::logins::inject(&wv);
             }
         })
         .on_document_title_changed(|wv, title| {
@@ -368,6 +404,10 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
             }
             find_icon(&wv); // single-page apps can swap it as they go
         });
+    if let Some(store) = data_store(&project) {
+        builder = builder.data_store_identifier(store);
+    }
+    crate::logins::set_project(&id, &project);
     let wv = window.add_child(builder, pos, size).map_err(err)?;
     #[cfg(target_os = "macos")]
     {
@@ -375,11 +415,12 @@ pub async fn web_show(app: AppHandle, window: Window, id: String, url: String, x
         let _ = wv.with_webview(move |v| {
             views.state::<Views>().0.lock().unwrap().insert(v.inner() as usize, id.clone());
             watch::catch_failures(v.inner());
+            crate::logins::attach(views.clone(), id.clone(), v.inner());
             watch::start(views, id, v.inner());
         });
     }
     round(&wv, radius);
-    Ok(())
+    Ok(Some(project))
 }
 
 #[tauri::command]
@@ -420,6 +461,7 @@ pub fn zoom(app: &AppHandle, id: &str, dir: i32) {
 pub async fn web_close(app: AppHandle, id: String) -> Res<()> {
     app.state::<Views>().0.lock().unwrap().retain(|_, v| *v != id);
     ZOOMS.lock().unwrap().get_or_insert_default().remove(&id);
+    crate::logins::forget_tab(&id);
     match app.get_webview(&label(&id)) {
         Some(wv) => {
             #[cfg(target_os = "macos")]
@@ -524,7 +566,14 @@ pub fn focus_app(app: &AppHandle, window: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{error_page, icon_type};
+    use super::{data_store, error_page, icon_type};
+
+    #[test]
+    fn each_project_keeps_its_own_store() {
+        assert_eq!(data_store(""), None);
+        assert_eq!(data_store("/p/shop"), data_store("/p/shop"));
+        assert_ne!(data_store("/p/shop"), data_store("/p/blog"));
+    }
 
     #[test]
     fn error_pages_name_the_address_safely() {
