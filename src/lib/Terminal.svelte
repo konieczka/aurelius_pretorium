@@ -6,10 +6,12 @@
   import { WebglAddon } from "@xterm/addon-webgl";
   import { WebLinksAddon } from "@xterm/addon-web-links";
   import "@xterm/xterm/css/xterm.css";
-  import { app, copyText, openBrowserBeside } from "./state.svelte";
+  import { app, copyText, openBrowserBeside, openFileBeside } from "./state.svelte";
   import { toast } from "./Toast.svelte";
   import { cssHex, theme } from "./theme.svelte";
   import { relaunchCommand } from "./agents.svelte";
+  import { revealLine } from "./Editor.svelte";
+  import { fileLinkProvider } from "./termLinks";
   import * as L from "./layout";
 
   // ANSI colours per mode, tuned for the Aurelius surfaces (the alternate palettes keep them: same lightness).
@@ -105,9 +107,19 @@
   const isFileDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.some((t) => t === "Files" || t === "text/x-path");
 
   // Click copies the link; Cmd+click opens it in a browser tab in a new pane to the right. Dragging across one still selects.
+  // A link to a file (file://, or a path in the text: see termLinks.ts) opens it in a tab on click.
   function linkClicked(tabId: string, ev: MouseEvent, uri: string) {
-    if (!ev.metaKey) copyText(uri).then((ok) => ok && toast("Link copied", ev.clientX, ev.clientY));
+    if (/^file:\/\//i.test(uri)) openFileBeside(decodeURIComponent(new URL(uri).pathname), tabId);
+    else if (!ev.metaKey) copyText(uri).then((ok) => ok && toast("Link copied", ev.clientX, ev.clientY));
     else if (/^https?:\/\//i.test(uri)) openBrowserBeside(uri, tabId); // OSC 8 links can be anything: web pages only
+  }
+
+  /** The files `paths` in tab `tabId`'s output name: relative ones are in its shell's folder, or else the workspace's. */
+  function filesIn(tabId: string, paths: string[]) {
+    const f = L.findTab(app.root, tabId);
+    const t = f?.pane.tabs[f.index];
+    const bases = [t?.kind === "term" ? t.cwd : "", app.workspace].filter(Boolean);
+    return invoke<(string | null)[]>("existing_files", { bases, paths });
   }
 
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {
@@ -128,6 +140,12 @@
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon((ev, uri) => linkClicked(tabId, ev, uri)));
+    term.registerLinkProvider(
+      fileLinkProvider(term, (paths) => filesIn(tabId, paths), (_ev, file, ref) => {
+        const id = openFileBeside(file, tabId, !!ref.line);
+        if (ref.line) revealLine(id, ref.line, ref.col);
+      }),
+    );
     term.open(host);
     try {
       const gl = new WebglAddon();

@@ -11,8 +11,14 @@
     mockWindows("main");
     // What the harness doesn't serve (terminals, dialogs) is recorded for the tests to read, and answers null.
     const calls: { cmd: string; args: unknown }[] = ((window as unknown as { __e2eCalls: unknown[] }).__e2eCalls = []) as never;
-    const served = /^(infra_scan|infra_recipes|db_[a-z]+)$/;
+    // Terminals have no shell: a test writes their output to `onData` itself, at cells it finds from their size.
+    type Term = { onData: { onmessage: (buf: ArrayBuffer) => void }; cols: number; rows: number };
+    const terms: Record<string, Term> = ((window as unknown as { __e2eTerms: unknown }).__e2eTerms = {}) as never;
+    const served = /^(infra_scan|infra_recipes|db_[a-z]+|existing_files|open_file)$/;
     mockIPC(async (cmd, args) => {
+      const a = args as Term & { id: string };
+      if (cmd === "pty_open") terms[a.id] = { onData: a.onData, cols: a.cols, rows: a.rows };
+      if (cmd === "pty_resize" && terms[a.id]) Object.assign(terms[a.id], { cols: a.cols, rows: a.rows });
       if (!served.test(cmd)) {
         calls.push({ cmd, args: cmd === "pty_write" ? args : null });
         return null;

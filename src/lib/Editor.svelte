@@ -25,6 +25,7 @@
     entries.get(tabId)?.view?.destroy();
     entries.get(tabId)?.host.remove();
     entries.delete(tabId);
+    lines.delete(tabId);
   }
 
   /** The editor's text as it goes to disk: with the file's own line breaks (CodeMirror keeps lines, not breaks). */
@@ -100,6 +101,18 @@
   };
 
   export const focusEditor = (tabId: string) => entries.get(tabId)?.view?.focus();
+
+  // Where to put the cursor once the tab's text has loaded (a terminal's link to "file:line").
+  const lines = new Map<string, { line: number; col: number }>();
+  /** Put the cursor on `line` (1-based), at column `col`, and scroll it into the middle of the editor. */
+  export function revealLine(tabId: string, line: number, col = 1) {
+    const v = entries.get(tabId)?.view;
+    if (!v) return void lines.set(tabId, { line, col });
+    const l = v.state.doc.line(Math.min(Math.max(line, 1), v.state.doc.lines));
+    const anchor = l.from + Math.min(Math.max(col - 1, 0), l.length);
+    v.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: "center" }) });
+    v.focus();
+  }
   const text = (tabId: string) => entries.get(tabId)?.view?.state.doc.toString() ?? "";
 
   // Unsaved text carried over from another window (its workspace moved here): opens in place of the file, still unsaved.
@@ -196,6 +209,8 @@
         languageFor(path)?.then((support) => e.view?.dispatch({ effects: lang.reconfigure(support) }));
         app.conflicts[tabId] = conflictsIn(e.view.state).length;
         app.dirty[tabId] = draft !== undefined; // also nudges reactivity so the preview renders once loaded
+        const at = lines.get(tabId);
+        if (at) lines.delete(tabId), revealLine(tabId, at.line, at.col);
       },
       (err) => {
         // read_file reads text: anything else (fonts, archives, binaries) fails to decode.

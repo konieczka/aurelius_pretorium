@@ -96,6 +96,9 @@ async fn dispatch(cmd: &str, a: Value, dbs: &db::Dbs) -> Res<Value> {
         "db_value" => json(dbs.value(&s("id"), n("db"), s("key")).await),
         "db_command" => json(dbs.command(&s("id"), n("db"), s("line"), b("write")).await),
         "db_files" => json(db::db_files(s("dir")).await),
+        // A terminal's file links, and the editor they open.
+        "existing_files" => json(Ok(crate::existing_files(arg(&a, "bases")?, arg(&a, "paths")?).await)),
+        "open_file" => json(crate::open_file(s("path")).await),
         _ => Err(format!("The e2e harness doesn't serve {cmd}")),
     }
 }

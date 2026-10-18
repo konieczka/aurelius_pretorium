@@ -219,6 +219,30 @@ export function openFile(path: string) {
   p.active = p.tabs.length - 1;
 }
 
+/** A file linked in tab `beside`'s output (a terminal): brought up if it's open, else opened in another pane (the one
+ * on the right, or a new one) so the terminal stays in view. `source`: show its text, not a preview (it was linked at
+ * a line). Returns its tab's id. */
+export function openFileBeside(path: string, beside: string, source = false): string {
+  closeViews();
+  const preview = !source || isDrawing(path) ? hasPreview(path) : false;
+  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
+  if (existing?.kind === "file") {
+    if (source && !isDrawing(path)) existing.preview = false;
+    activate(existing.id);
+    return existing.id;
+  }
+  const t: L.Tab = { id: L.uid(), kind: "file", path, preview };
+  const at = L.findTab(app.root, beside);
+  const right = L.rightmost(app.root);
+  const other = !at ? focusedPane() : right !== at.pane ? right : L.panes(app.root).findLast((p) => p !== at.pane);
+  if (other) {
+    other.tabs.push(t);
+    other.active = other.tabs.length - 1;
+    app.focused = other.id;
+  } else app.focused = L.split(app.root, at!.pane.id, "row", t).id;
+  return t.id;
+}
+
 /** Diff tab: staged = index vs HEAD, else working tree vs index; with `ref`, that commit's change. */
 export function openDiff(path: string, staged: boolean, orig?: string, ref?: string, base?: string) {
   closeViews();

@@ -675,6 +675,39 @@ async fn file_stamp(path: String) -> Option<String> {
     blocking(move || Ok(stamp_of(&path))).await.ok().flatten()
 }
 
+/// The file `path` names, as a terminal printed it (absolute, from home, or relative to one of `bases`, tried in
+/// turn), with `.` and `..` taken out; None when it isn't a file.
+fn existing_file(bases: &[String], path: &str) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let tilde = path.strip_prefix("~/").map(|rest| Path::new(&home).join(rest));
+    let tries: Vec<PathBuf> = match tilde {
+        Some(p) => vec![p],
+        None if path.starts_with('/') => vec![PathBuf::from(path)],
+        None => bases.iter().map(|b| Path::new(b).join(path)).collect(),
+    };
+    tries.into_iter().map(|p| clean_path(&p)).find(|p| p.is_absolute() && p.is_file()).map(|p| p.to_string_lossy().into_owned())
+}
+
+fn clean_path(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Which of the paths in a terminal's output are files (see termLinks.ts): each one's absolute path, or None.
+#[tauri::command]
+async fn existing_files(bases: Vec<String>, paths: Vec<String>) -> Vec<Option<String>> {
+    blocking(move || Ok(paths.iter().map(|p| existing_file(&bases, p)).collect())).await.unwrap_or_default()
+}
+
 /// What `write_file` reports when the file changed on disk since `expect` (the editor asks before overwriting).
 const CHANGED_ON_DISK: &str = "changed on disk";
 
@@ -1198,7 +1231,7 @@ pub fn run() {
         .manage(Awake::default())
         .manage(db::Dbs::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, existing_files, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
             web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused,
             logins::web_login_answer, logins::web_login_fill, logins::web_login_forget
         ])
@@ -1208,6 +1241,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finds_the_files_a_terminal_names() {
+        let root = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("pretorium-links-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("app/docs")).unwrap();
+        std::fs::write(root.join("app/docs/plan.md"), "").unwrap();
+        std::fs::write(root.join("top.md"), "").unwrap();
+        let (app, top) = (root.join("app").to_string_lossy().into_owned(), root.to_string_lossy().into_owned());
+        let plan = root.join("app/docs/plan.md").to_string_lossy().into_owned();
+        let found = |bases: &[&String], p: &str| super::existing_file(&bases.iter().map(|b| b.to_string()).collect::<Vec<_>>(), p);
+        assert_eq!(found(&[&app], "docs/plan.md").as_deref(), Some(plan.as_str()));
+        assert_eq!(found(&[&app], "./docs/../docs/plan.md").as_deref(), Some(plan.as_str()));
+        assert_eq!(found(&[&app], &plan).as_deref(), Some(plan.as_str()));
+        assert_eq!(found(&[&app], "../top.md"), found(&[&app, &top], "top.md")); // the second folder is tried too
+        assert!(found(&[&app], "../top.md").is_some());
+        assert_eq!(found(&[&app], "docs"), None); // a folder
+        assert_eq!(found(&[&app], "docs/gone.md"), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn reads_a_processs_working_directory() {
         let dir = std::fs::canonicalize(std::env::temp_dir()).unwrap();

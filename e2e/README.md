@@ -8,6 +8,7 @@ Scenarios for the Servers panel's database tabs, one file per phase:
 | `tests/2-mysql-redis.e2e.ts` | MariaDB in the same SQL view; Redis keys by pattern, values by type, the console |
 | `tests/3-writes.e2e.ts` | Write mode: the confirmation, queries that change data, cell edits that show their `UPDATE` first, why a cell can't be edited |
 | `tests/4-mongo-sqlite-agent.e2e.ts` | Mongo through `mongosh` in its container; the project's SQLite files; asking the coding agent |
+| `tests/5-terminal-links.e2e.ts` | File paths in a terminal's output as links: a file opens in a tab beside it, at its line if one is given; paths that aren't files stay text |
 
 They use the [e2e](https://e2e.tester.army/docs) framework with exact locators only: no AI model, no sign-in.
 
@@ -31,9 +32,10 @@ backend code:
   labelled as the Compose project of `fixtures/shop`, the workspace the tests open. `services.sh down` removes them;
   `serve.sh` does when it stops.
 - The harness (`src-tauri/src/harness.rs`, built with `--features e2e`) answers the app's `infra_*` and `db_*`
-  commands over HTTP on :7811.
+  commands over HTTP on :7811, and `existing_files` and `open_file` for the terminal's file links.
 - `/e2e` (`src/routes/e2e`, dev builds only) mounts the Servers panel and the panes, with Tauri's IPC mocked to call the
-  harness. Commands it doesn't serve (terminals) are recorded in `window.__e2eCalls` for the tests to read.
+  harness. Commands it doesn't serve (terminals) are recorded in `window.__e2eCalls` for the tests to read. There's
+  no shell behind a terminal: a test writes its output through `window.__e2eTerms`, which also has its size.
 
 The tests only touch the `pretorium-e2e-*` containers and `fixtures/shop`. With `serve.sh` already running, the runner
 reuses it; the write tests put their rows back first (`tests/reset.ts`).
