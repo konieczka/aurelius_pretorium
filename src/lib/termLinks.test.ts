@@ -9,6 +9,11 @@ test("paths with a folder or an extension are candidates, wherever they sit in a
   expect(paths("Read(src/lib/Terminal.svelte) and `src-tauri/Cargo.toml`, then ./run.sh")).toEqual(["src/lib/Terminal.svelte", "src-tauri/Cargo.toml", "./run.sh"]);
   expect(paths("/Users/me/project/a.ts ~/notes/todo.txt ../up/b.rs")).toEqual(["/Users/me/project/a.ts", "~/notes/todo.txt", "../up/b.rs"]);
   expect(paths("a.ts, b.ts")).toEqual(["a.ts", "b.ts"]);
+  expect(paths("a.ts,b.ts --out=dist/a.js config=src/app.json")).toEqual(["a.ts", "b.ts", "dist/a.js", "src/app.json"]);
+});
+
+test("names in any script are read whole", () => {
+  expect(paths("docs/zażółć.md and src/café.md:3, 文档/说明.md")).toEqual(["docs/zażółć.md", "src/café.md", "文档/说明.md"]);
 });
 
 test("words, numbers, versions and folders on their own aren't", () => {

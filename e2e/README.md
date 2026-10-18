@@ -32,7 +32,7 @@ backend code:
   labelled as the Compose project of `fixtures/shop`, the workspace the tests open. `services.sh down` removes them;
   `serve.sh` does when it stops.
 - The harness (`src-tauri/src/harness.rs`, built with `--features e2e`) answers the app's `infra_*` and `db_*`
-  commands over HTTP on :7811, and `existing_files` and `open_file` for the terminal's file links.
+  commands over HTTP on :7811, and `existing_files` and `open_file` for the terminal's file links (files in `fixtures/` only).
 - `/e2e` (`src/routes/e2e`, dev builds only) mounts the Servers panel and the panes, with Tauri's IPC mocked to call the
   harness. Commands it doesn't serve (terminals) are recorded in `window.__e2eCalls` for the tests to read. There's
   no shell behind a terminal: a test writes its output through `window.__e2eTerms`, which also has its size.

@@ -4,9 +4,10 @@ import type { IBufferCellPosition, ILink, ILinkProvider, Terminal } from "@xterm
 
 export type PathRef = { start: number; text: string; path: string; line?: number; col?: number };
 
-// A run of path characters, with a ":line" or ":line:col" after it. Spaces end a path: one with spaces isn't told
-// apart from the words around it.
-const candidate = /(?:~|\.{1,2})?\/?[\w@%+=.,-]+(?:\/[\w@%+=.,-]+)*\/?(?::(\d+)(?::(\d+))?)?/g;
+// A run of path characters (letters in any script), with a ":line" or ":line:col" after it. Spaces end a path: one
+// with spaces isn't told apart from the words around it. So do "," and "=", which join paths to what's next to them
+// ("a.ts,b.ts", "--out=dist/a.js") far more often than they're in a name.
+const candidate = /(?:~|\.{1,2})?\/?[\p{L}\p{M}\p{N}_@%+.-]+(?:\/[\p{L}\p{M}\p{N}_@%+.-]+)*\/?(?::(\d+)(?::(\d+))?)?/gu;
 
 /** What in `text` may be a file's path: one with a folder in it or a file extension. URLs are left to the web links. */
 export function pathRefs(text: string): PathRef[] {
@@ -14,14 +15,14 @@ export function pathRefs(text: string): PathRef[] {
   for (const m of text.matchAll(candidate)) {
     let s = m[0];
     let path = s.replace(/(?::\d+){1,2}$/, "");
-    // Sentence punctuation after a path isn't part of it ("see docs/plan.md." or "a.ts, b.ts").
-    const trail = path.match(/[.,]+$/)?.[0].length ?? 0;
+    // A full stop after a path isn't part of it ("see docs/plan.md.").
+    const trail = path.match(/\.+$/)?.[0].length ?? 0;
     if (trail && path.length < s.length) continue; // "a.ts.:3" isn't a path and a line
     if (trail) (path = path.slice(0, -trail)), (s = s.slice(0, -trail));
     const start = m.index;
     if (!path || path.endsWith("/") || /^[.~/]*$/.test(path)) continue;
     if (/[\w.+-]:\/\/?$/.test(text.slice(0, start))) continue; // in a URL
-    if (!path.includes("/") && !/[^.]\.[A-Za-z][\w-]*$/.test(path)) continue; // a word, a number, a version
+    if (!path.includes("/") && !/[^.]\.\p{L}[\p{L}\p{N}_-]*$/u.test(path)) continue; // a word, a number, a version
     const line = m[1] ? Number(m[1]) : undefined;
     const col = m[2] ? Number(m[2]) : undefined;
     out.push({ start, text: s, path, ...(line ? { line } : {}), ...(col ? { col } : {}) });

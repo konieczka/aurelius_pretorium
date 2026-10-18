@@ -74,6 +74,12 @@ fn arg<T: serde::de::DeserializeOwned>(a: &Value, k: &str) -> Res<T> {
     serde_json::from_value(a[k].clone()).map_err(|e| format!("bad {k}: {e}"))
 }
 
+/// Whether `path` is in the tests' fixtures (E2E_FIXTURES, set by serve.sh): the only files the harness reads out.
+fn in_fixtures(path: &str) -> bool {
+    let root = std::env::var("E2E_FIXTURES").unwrap_or_default();
+    !root.is_empty() && crate::clean_path(std::path::Path::new(path)).starts_with(&root)
+}
+
 async fn dispatch(cmd: &str, a: Value, dbs: &db::Dbs) -> Res<Value> {
     let s = |k: &str| a[k].as_str().unwrap_or_default().to_string();
     let n = |k: &str| a[k].as_i64().unwrap_or_default();
@@ -96,9 +102,12 @@ async fn dispatch(cmd: &str, a: Value, dbs: &db::Dbs) -> Res<Value> {
         "db_value" => json(dbs.value(&s("id"), n("db"), s("key")).await),
         "db_command" => json(dbs.command(&s("id"), n("db"), s("line"), b("write")).await),
         "db_files" => json(db::db_files(s("dir")).await),
-        // A terminal's file links, and the editor they open.
-        "existing_files" => json(Ok(crate::existing_files(arg(&a, "bases")?, arg(&a, "paths")?).await)),
-        "open_file" => json(crate::open_file(s("path")).await),
+        // A terminal's file links, and the editor they open: the fixtures' files only, for any page can ask.
+        "existing_files" => {
+            let found = crate::existing_files(arg(&a, "bases")?, arg(&a, "paths")?).await;
+            json(Ok(found.into_iter().map(|f| f.filter(|f| in_fixtures(f))).collect::<Vec<_>>()))
+        }
+        "open_file" if in_fixtures(&s("path")) => json(crate::open_file(s("path")).await),
         _ => Err(format!("The e2e harness doesn't serve {cmd}")),
     }
 }

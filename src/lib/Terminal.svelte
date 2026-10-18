@@ -108,11 +108,16 @@
 
   // Click copies the link; Cmd+click opens it in a browser tab in a new pane to the right. Dragging across one still selects.
   // A link to a file (file://, or a path in the text: see termLinks.ts) opens it in a tab on click.
+  // A file:// link to something else (a folder) is a link like the rest.
   function linkClicked(tabId: string, ev: MouseEvent, uri: string) {
-    if (/^file:\/\//i.test(uri)) openFileBeside(decodeURIComponent(new URL(uri).pathname), tabId);
-    else if (!ev.metaKey) copyText(uri).then((ok) => ok && toast("Link copied", ev.clientX, ev.clientY));
+    if (/^file:\/\//i.test(uri)) fileOf(tabId, uri).then((file) => {
+        if (file) openFileBeside(file, tabId);
+        else if (!ev.metaKey) linkCopied(ev, uri);
+      });
+    else if (!ev.metaKey) linkCopied(ev, uri);
     else if (/^https?:\/\//i.test(uri)) openBrowserBeside(uri, tabId); // OSC 8 links can be anything: web pages only
   }
+  const linkCopied = (ev: MouseEvent, uri: string) => copyText(uri).then((ok) => ok && toast("Link copied", ev.clientX, ev.clientY));
 
   /** The files `paths` in tab `tabId`'s output name: relative ones are in its shell's folder, or else the workspace's. */
   function filesIn(tabId: string, paths: string[]) {
@@ -120,6 +125,18 @@
     const t = f?.pane.tabs[f.index];
     const bases = [t?.kind === "term" ? t.cwd : "", app.workspace].filter(Boolean);
     return invoke<(string | null)[]>("existing_files", { bases, paths });
+  }
+
+  /** A file:// link's file, if it is one here (not a folder, nor missing). Its host is ignored: `ls --hyperlink` names
+   * this Mac, which the page doesn't know. */
+  async function fileOf(tabId: string, uri: string) {
+    let path: string;
+    try {
+      path = decodeURIComponent(new URL(uri).pathname);
+    } catch {
+      return null; // not a URL, or a broken %-escape
+    }
+    return (await filesIn(tabId, [path]).catch(() => [null]))[0];
   }
 
   function create(tabId: string, cwd: string, container: HTMLElement): Entry {

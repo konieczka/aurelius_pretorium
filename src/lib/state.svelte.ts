@@ -219,22 +219,27 @@ export function openFile(path: string) {
   p.active = p.tabs.length - 1;
 }
 
-/** A file linked in tab `beside`'s output (a terminal): brought up if it's open, else opened in another pane (the one
- * on the right, or a new one) so the terminal stays in view. `source`: show its text, not a preview (it was linked at
- * a line). Returns its tab's id. */
+/** A file linked in tab `beside`'s output (a terminal), shown so the terminal stays in view: in another pane (the
+ * rightmost, else the last one that isn't the terminal's), or a new one to the terminal's right. A tab already open
+ * for it is brought up where it is, unless that's behind the terminal: then it moves over the same way. `source`:
+ * show its text, not a preview (it was linked at a line). Returns its tab's id. */
 export function openFileBeside(path: string, beside: string, source = false): string {
   closeViews();
-  const preview = !source || isDrawing(path) ? hasPreview(path) : false;
-  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
-  if (existing?.kind === "file") {
-    if (source && !isDrawing(path)) existing.preview = false;
-    activate(existing.id);
-    return existing.id;
-  }
-  const t: L.Tab = { id: L.uid(), kind: "file", path, preview };
   const at = L.findTab(app.root, beside);
   const right = L.rightmost(app.root);
   const other = !at ? focusedPane() : right !== at.pane ? right : L.panes(app.root).findLast((p) => p !== at.pane);
+  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "file" && t.path === path);
+  if (existing?.kind === "file") {
+    if (source && !isDrawing(path)) existing.preview = false;
+    if (at && at.pane.tabs.includes(existing)) {
+      if (other) L.moveTab(app.root, existing.id, other.id, other.tabs.length);
+      else L.dockTab(app.root, existing.id, at.pane.id, "right");
+      at.pane.active = at.pane.tabs.findIndex((t) => t.id === beside);
+    }
+    activate(existing.id);
+    return existing.id;
+  }
+  const t: L.Tab = { id: L.uid(), kind: "file", path, preview: !source || isDrawing(path) ? hasPreview(path) : false };
   if (other) {
     other.tabs.push(t);
     other.active = other.tabs.length - 1;
