@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw, Server } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
@@ -28,6 +28,7 @@
   import AgentSettings from "$lib/AgentSettings.svelte";
   import { agents, closeAgents, saveAgentFile, toggleAgents } from "$lib/agentsView.svelte";
   import Fleet from "$lib/Fleet.svelte";
+  import Infra, { infra, refreshInfra, serverCount, watchInfra } from "$lib/Infra.svelte";
   import NewAgent from "$lib/NewAgent.svelte";
   import GalleyIcon from "$lib/GalleyIcon.svelte";
   import Settings from "$lib/Settings.svelte";
@@ -48,6 +49,7 @@
   warmUsage();
   $effect(save);
   $effect(watchAgents);
+  $effect(watchInfra);
   $effect(() => {
     if (app.workspace) return watchGit();
   });
@@ -153,6 +155,10 @@
             <GitBranch size={15} strokeWidth={1.5} />
             {#if changeCount()}<span class="badge">{changeCount()}</span>{/if}
           </button>
+          <button class="icon-btn mode" class:on={app.sidebar === "infra"} role="tab" aria-selected={app.sidebar === "infra"} onclick={() => (app.sidebar = "infra")} title="Servers: dev servers, databases and containers on this Mac">
+            <Server size={15} strokeWidth={1.5} />
+            {#if serverCount()}<span class="badge" title="{serverCount()} running for this workspace">{serverCount()}</span>{/if}
+          </button>
         </div>
         <span class="spacer"></span>
         {#if app.sidebar === "files"}
@@ -167,6 +173,11 @@
           <button class="icon-btn" onclick={refreshGit} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={pull} disabled={!!git.busy} title="Pull"><ArrowDown size={14} strokeWidth={1.5} /></button>
           <button class="icon-btn" onclick={push} disabled={!!git.busy} title="Push"><ArrowUp size={14} strokeWidth={1.5} /></button>
+        {:else if app.sidebar === "infra"}
+          <button class="icon-btn" class:on={infra.all} aria-pressed={infra.all} onclick={() => (infra.all = !infra.all)} title={infra.all ? "Hide the system's and apps' ports" : "Show the system's and apps' ports too"}>
+            {#if infra.all}<EyeOff size={14} strokeWidth={1.5} />{:else}<Eye size={14} strokeWidth={1.5} />{/if}
+          </button>
+          <button class="icon-btn" onclick={refreshInfra} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
         {/if}
       </div>
       {#if app.sidebar === "files"}
@@ -193,6 +204,8 @@
         </div>
       {:else if app.sidebar === "git"}
         <div class="tree"><GitPanel /></div>
+      {:else if app.sidebar === "infra"}
+        <div class="tree"><Infra /></div>
       {:else}
         <div class="tree"><Fleet /></div>
       {/if}
