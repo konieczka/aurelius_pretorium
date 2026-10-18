@@ -54,7 +54,7 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + "/"
 /** The opened folder a path belongs to (deepest match); if none, the path itself for a folder, else its parent dir. */
 export const ownerOf = (path: string, dir = false) =>
   app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? (dir ? path : path.slice(0, path.lastIndexOf("/")));
-const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" ? "" : t.path);
+const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" ? "" : t.kind === "db" ? t.target.root : t.path);
 /** Folder a tab belongs to ("" for an unsaved note or a web page). A terminal's follows its shell's `cd`. */
 export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t), t.kind === "term") : "");
 /** Folder whose checkout (worktree / branch) a tab shows: a terminal's own directory, as an agent may have moved into
@@ -174,6 +174,18 @@ export function openBrowserBeside(url: string, beside: string) {
   if (!at) return openBrowser(url);
   closeViews();
   app.focused = L.split(app.root, at.pane.id, "row", { id: L.uid(), kind: "web", url }).id;
+}
+
+/** A database's tab: brought up if one is open for it, else opened in the focused pane. */
+export function openDb(target: L.DbTarget, name: string) {
+  closeViews();
+  const same = (t: L.DbTarget) => t.engine === target.engine && t.host === target.host && t.port === target.port && t.container === target.container && t.file === target.file;
+  const existing = L.panes(app.root).flatMap((p) => p.tabs).find((t) => t.kind === "db" && same(t.target));
+  if (existing) return activate(existing.id);
+  const p = focusedPane();
+  p.tabs.push({ id: L.uid(), kind: "db", name, target });
+  p.active = p.tabs.length - 1;
+  app.focused = p.id;
 }
 
 /** New terminal tab that runs `command` once its shell starts: in the focused pane, or the rightmost one. Returns its id. */

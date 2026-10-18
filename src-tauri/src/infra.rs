@@ -48,6 +48,7 @@ pub struct Container {
     project: String, // Compose project ("" for a plain `docker run`)
     service: String,
     root: String, // the Compose project's checkout
+    dir: String,  // the Compose project's own folder (its .env)
 }
 
 #[derive(Serialize)]
@@ -61,6 +62,11 @@ pub struct Scan {
 #[tauri::command]
 pub async fn infra_scan(ptys: State<'_, Ptys>) -> Res<Scan> {
     let shells: HashMap<u32, String> = ptys.sessions.lock().unwrap().iter().filter_map(|(id, s)| Some((s.child.process_id()?, id.clone()))).collect();
+    scan(shells).await
+}
+
+/// The scan, given each terminal's shell pid (by tab id).
+pub(crate) async fn scan(shells: HashMap<u32, String>) -> Res<Scan> {
     blocking(move || {
         let (containers, docker) = containers();
         Ok(Scan { listeners: listeners(&shells), containers, docker })
@@ -214,7 +220,7 @@ fn exe_of(pid: u32) -> Option<String> {
 }
 
 /// `docker` with the user's PATH, or None when there's no docker CLI.
-fn docker() -> Option<Command> {
+pub(crate) fn docker() -> Option<Command> {
     let path = login_path();
     let bin = std::env::split_paths(path).map(|d| d.join("docker")).find(|p| p.is_file())?;
     let mut cmd = Command::new(bin);
@@ -248,6 +254,7 @@ fn parse_container(line: &str) -> Option<Container> {
         project: project.into(),
         service: service.into(),
         root: if dir.is_empty() { String::new() } else { checkout(dir).unwrap_or_else(|| dir.into()) },
+        dir: dir.into(),
     })
 }
 

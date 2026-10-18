@@ -20,3 +20,10 @@ vite.config.ts.timestamp-*
 # Misc
 pretorium.key
 workplan.md
+
+# E2E test runs (reports, traces, the app log)
+.e2e/
+
+# E2E: the fixture project's .env is test data; its SQLite file is written by e2e/services.sh
+!/e2e/fixtures/shop/.env
+/e2e/fixtures/shop/data/

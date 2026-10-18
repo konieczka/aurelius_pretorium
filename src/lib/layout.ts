@@ -8,7 +8,19 @@ export type Tab =
   // path absolute, orig repo-relative; ref = a commit (shows ref^ -> ref instead of index/worktree), or base -> ref
   | { id: string; kind: "diff"; path: string; staged: boolean; orig?: string; ref?: string; base?: string }
   // url "" = a new tab waiting for an address; title = the page's, last seen
-  | { id: string; kind: "web"; url: string; title?: string };
+  | { id: string; kind: "web"; url: string; title?: string }
+  // a database on this machine (see db/); name: what the tab says; write: statements may change data
+  | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean };
+/** Where a database is: a server's port, a container (exec'd into without one), or a SQLite file. root: its project. */
+export type DbTarget = {
+  engine: "postgres" | "mysql" | "redis" | "mongo" | "sqlite";
+  host?: string;
+  port?: number;
+  container?: string;
+  file?: string;
+  root: string;
+  database?: string;
+};
 export type Pane = { id: string; type: "pane"; tabs: Tab[]; active: number };
 export type Split = { id: string; type: "split"; dir: "row" | "col"; children: LNode[]; sizes: number[] };
 export type LNode = Pane | Split;
@@ -189,7 +201,7 @@ export function restore(root: Split, m: Minimized): Pane {
 type Raw = any;
 const str = (v: unknown) => typeof v === "string";
 export const isTab = (t: Raw): t is Tab =>
-  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : (t.kind === "file" || t.kind === "diff") && str(t.path));
+  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : t.kind === "db" ? str(t.name) && str(t.target?.engine) && str(t.target?.root) : (t.kind === "file" || t.kind === "diff") && str(t.path));
 function isNode(n: Raw): n is LNode {
   if (n?.type === "pane") return str(n.id) && Array.isArray(n.tabs) && n.tabs.every(isTab) && Number.isInteger(n.active);
   return (

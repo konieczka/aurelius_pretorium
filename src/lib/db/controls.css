@@ -1,0 +1,58 @@
+/* Form controls in database tabs, in the app's look (as the Source Control panel's). */
+.db input:not([type="checkbox"]),
+.db select {
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color var(--dur-quick) var(--ease-standard);
+}
+.db select {
+  padding-right: 4px;
+}
+.db input:focus,
+.db select:focus {
+  border-color: var(--gold-ring);
+}
+.db .ghost,
+.db .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.db .ghost {
+  border: 1px solid var(--input);
+  background: var(--background);
+}
+.db .ghost:hover {
+  background: var(--accent);
+}
+.db .primary {
+  border: 0;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: var(--shadow-raised);
+  font-weight: 500;
+}
+.db .primary:hover {
+  opacity: 0.9;
+}
+.db .ghost:disabled,
+.db .primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

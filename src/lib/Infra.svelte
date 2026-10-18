@@ -3,7 +3,7 @@
   import { app } from "./state.svelte";
 
   export type Listener = { pid: number; ports: number[]; name: string; args: string; cwd: string; root: string; kind: "project" | "service" | "system"; tab: string | null };
-  export type Container = { id: string; name: string; image: string; state: string; status: string; ports: { host: number; inner: number }[]; project: string; service: string; root: string };
+  export type Container = { id: string; name: string; image: string; state: string; status: string; ports: { host: number; inner: number }[]; project: string; service: string; root: string; dir: string };
   export type Recipe = { dir: string; name: string; command: string; kind: "script" | "compose" | "just" | "make" };
   type Scan = { listeners: Listener[]; containers: Container[]; docker: "ok" | "down" | "missing" };
 
@@ -11,6 +11,7 @@
     scan: null as Scan | null,
     recipes: [] as Recipe[], // ways to start the workspace's dev servers (package.json scripts, Compose, just, make)
     recipesFor: "", // the workspace they're for
+    files: [] as string[], // the workspace's SQLite databases
     all: false, // also the system's and apps' own ports (AirPlay, Postman, Ollama...)
   });
 
@@ -20,8 +21,12 @@
     const seq = ++refreshes;
     const ws = app.workspace;
     try {
-      const [s, r] = await Promise.all([invoke<Scan>("infra_scan"), ws ? invoke<Recipe[]>("infra_recipes", { dir: ws }).catch(() => []) : []]);
-      if (seq === refreshes) Object.assign(infra, { scan: s, recipes: r, recipesFor: ws });
+      const [s, r, f] = await Promise.all([
+        invoke<Scan>("infra_scan"),
+        ws ? invoke<Recipe[]>("infra_recipes", { dir: ws }).catch(() => []) : [],
+        ws ? invoke<string[]>("db_files", { dir: ws }).catch(() => []) : [],
+      ]);
+      if (seq === refreshes) Object.assign(infra, { scan: s, recipes: r, recipesFor: ws, files: f });
     } catch {}
   }
 
@@ -50,8 +55,9 @@
 
 <script lang="ts">
   import { ask, message } from "@tauri-apps/plugin-dialog";
-  import { ChevronRight, CircleStop, Ellipsis, Globe, Play, RotateCw, ScrollText, SquareTerminal } from "@lucide/svelte";
-  import { openBrowser, runInTerminal } from "./state.svelte";
+  import { ChevronRight, CircleStop, Database, Ellipsis, Globe, Play, RotateCw, ScrollText, SquareTerminal } from "@lucide/svelte";
+  import { openBrowser, openDb, runInTerminal } from "./state.svelte";
+  import { containerTarget, engineName, engineOfContainer, engineOfProcess, processTarget } from "./db/db";
   import { pick } from "./QuickPick.svelte";
   import { showTab, tabsIn, ws } from "./workspaces.svelte";
 
@@ -150,10 +156,27 @@
   }
   const logs = (c: Container) => runInTerminal(c.root || app.workspace, `docker logs -f --tail 200 ${c.name}`);
 
-  // The row itself does the obvious thing: back to the terminal running it, else its page.
+  // Databases open in a tab of their own (see db/).
+  const dbOf = (l: Listener) => (l.kind === "system" ? null : engineOfProcess(l.name));
+  const browseProcess = (l: Listener) => {
+    const e = dbOf(l);
+    if (e) openDb(processTarget(e, l.ports, l.root || app.workspace), `${l.name} :${processTarget(e, l.ports, "").port}`);
+  };
+  const containerDb = (c: Container) => {
+    const e = engineOfContainer(c.image, c.ports.map((p) => p.inner));
+    return e && { engine: e, target: c.state === "running" ? containerTarget(e, c.name, c.ports, c.dir || c.root || app.workspace) : null };
+  };
+  const browseContainer = (c: Container) => {
+    const t = containerDb(c)?.target;
+    if (t) openDb(t, c.service || c.name);
+  };
+  const browseFile = (f: string) => openDb({ engine: "sqlite", file: f, root: app.workspace }, base(f));
+
+  // The row itself does the obvious thing: a database's tables, else back to the terminal running it, else its page.
   function primary(l: Listener) {
     const p = webPort(l);
-    if (l.tab && workspaceOf(l.tab)) goTo(l.tab);
+    if (dbOf(l)) browseProcess(l);
+    else if (l.tab && workspaceOf(l.tab)) goTo(l.tab);
     else if (p) open(p);
   }
   const listenerHint = (l: Listener) => [l.args, l.cwd, `pid ${l.pid}`, l.tab ? "Started in a Pretorium terminal" : ""].filter(Boolean).join("\n");
@@ -167,7 +190,10 @@
     <span class="name">{l.name}</span>
     <span class="dir">{where(l)}</span>
     <span class="acts">
-      {#if p}
+      {#if dbOf(l)}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
+        <span role="button" class="act" title="Browse its data" onclick={(e) => (e.stopPropagation(), browseProcess(l))}><Database size={13} strokeWidth={1.5} /></span>
+      {:else if p}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
         <span role="button" class="act" title="Open localhost:{p} in a browser tab" onclick={(e) => (e.stopPropagation(), open(p))}><Globe size={13} strokeWidth={1.5} /></span>
       {/if}
@@ -187,12 +213,18 @@
 {#snippet container(c: Container)}
   {@const p = webContainerPort(c)}
   {@const up = c.state === "running"}
-  <button class="row" class:off={!up} title={containerHint(c)} onclick={() => p && open(p)}>
+  {@const d = containerDb(c)}
+  <button class="row" class:off={!up} title={containerHint(c)} onclick={() => (d?.target ? browseContainer(c) : p && open(p))}>
     <span class="dot" class:on={up}></span>
     <span class="name">{c.service || c.name}</span>
     <span class="dir">{up ? c.image : c.status}</span>
     <span class="acts">
-      {#if p}
+      {#if d?.target}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
+        <span role="button" class="act" title="Browse its data" onclick={(e) => (e.stopPropagation(), browseContainer(c))}><Database size={13} strokeWidth={1.5} /></span>
+      {:else if d && up}
+        <span class="act off" title="Publish its port to browse this {engineName[d.engine]} database"><Database size={13} strokeWidth={1.5} /></span>
+      {:else if p}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
         <span role="button" class="act" title="Open localhost:{p} in a browser tab" onclick={(e) => (e.stopPropagation(), open(p))}><Globe size={13} strokeWidth={1.5} /></span>
       {/if}
@@ -216,7 +248,8 @@
   <div class="empty">Loading…</div>
 {:else}
   {@const here = view.here}
-  {@const herecount = here.listeners.length + here.containers.length}
+  {@const files = infra.recipesFor === app.workspace ? infra.files : []}
+  {@const herecount = here.listeners.length + here.containers.length + files.length}
   <div class="panel">
     <div class="section">
       <button class="shead" title={app.workspace} onclick={() => (closed[here.key] = !closed[here.key])}>
@@ -227,6 +260,13 @@
       {#if !closed[here.key]}
         {#each here.listeners as l (l.pid)}{@render listener(l)}{/each}
         {#each here.containers as c (c.id)}{@render container(c)}{/each}
+        {#each files as f (f)}
+          <button class="row" title="SQLite database: {f}" onclick={() => browseFile(f)}>
+            <span class="play"><Database size={11} strokeWidth={2} /></span>
+            <span class="name">{base(f)}</span>
+            <span class="dir">{rel(f.slice(0, f.lastIndexOf("/")))}</span>
+          </button>
+        {/each}
         {#each starts.shown as r (key(r))}
           <button class="row start" title="Run {r.command} in a new terminal{rel(r.dir) ? ` in ${rel(r.dir)}` : ''}" onclick={() => start(r)}>
             <span class="play"><Play size={11} strokeWidth={2} /></span>
@@ -414,6 +454,9 @@
     height: 20px;
     border-radius: var(--radius-sm);
     color: var(--muted-foreground);
+  }
+  .act.off {
+    opacity: 0.4;
   }
   .act:hover {
     background: var(--accent);
