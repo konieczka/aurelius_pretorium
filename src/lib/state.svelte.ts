@@ -25,6 +25,10 @@ export function load<T>(key: string, fallback: T): T {
 
 // root/minimized/focused/workspace belong to the active workspace (workspaces.svelte.ts swaps them); tabs from any folder can
 // sit in it while the sidebar shows another one.
+export type SidebarMode = "files" | "git" | "fleet" | "infra";
+/** Order the unfolded sidebar lays its views out in, whatever order they were picked in. */
+const sidebarOrder: SidebarMode[] = ["fleet", "files", "git", "infra"];
+
 export const app = $state({
   workspace: "", // folder shown in the sidebar; new terminals start here
   root: L.rootWith(L.pane()),
@@ -43,7 +47,10 @@ export const app = $state({
   selectedPath: "", // tree row ⌘⌫ deletes
   renaming: "", // tree path with the inline rename input
   cut: "", // tree path Cut to the clipboard: pasting it in the tree moves it (elsewhere, e.g. Finder, it's a copy)
-  sidebar: "files" as "files" | "git" | "fleet" | "infra",
+  sidebar: "files" as SidebarMode, // the view last picked; the only one shown unless the sidebar is unfolded
+  unfolded: load<boolean>("sidebarUnfolded", false), // several views at once, side by side (or stacked)
+  shown: load<SidebarMode[]>("sidebarShown", ["files"]), // the views an unfolded sidebar shows
+  sidebarRows: load<boolean>("sidebarRows", false), // unfolded views stacked in rows instead of columns
   sidebarOpen: load<boolean>("sidebarOpen", true), // ⌘B / the header button hide the whole sidebar
   conflicts: {} as Record<string, number>, // tab id -> conflict blocks in the editor
   gitVersion: 0, // bumped on save / git ops: diff views refetch
@@ -108,10 +115,46 @@ export function toggleSidebar() {
   store.set("sidebarOpen", String(app.sidebarOpen));
 }
 
+/** The sidebar's views, in layout order. */
+export const sidebarModes = (): SidebarMode[] => (app.unfolded ? sidebarOrder.filter((m) => app.shown.includes(m)) : [app.sidebar]);
+export const isShown = (m: SidebarMode) => sidebarModes().includes(m);
+
+function saveSidebar() {
+  store.set("sidebarUnfolded", String(app.unfolded));
+  store.set("sidebarShown", JSON.stringify(app.shown));
+  store.set("sidebarRows", String(app.sidebarRows));
+}
+
+/** A mode button: folded, switch to `m`; unfolded (or ⌘-click, which unfolds), add or remove it. `reveal` only ever adds. */
+export function showMode(m: SidebarMode, add = false, reveal = false) {
+  if (app.unfolded || add) {
+    if (!app.unfolded) {
+      app.shown = [app.sidebar];
+      app.unfolded = true;
+    }
+    if (!app.shown.includes(m)) app.shown = [...app.shown, m];
+    else if (!reveal && app.shown.length > 1) app.shown = app.shown.filter((x) => x !== m);
+  }
+  app.sidebar = app.unfolded && !app.shown.includes(m) ? app.shown[0] : m;
+  saveSidebar();
+}
+
+/** Unfold the sidebar (starting from the view it shows) or fold it back to its last picked view. */
+export function toggleUnfold() {
+  if (!app.unfolded && !app.shown.includes(app.sidebar)) app.shown = [app.sidebar];
+  app.unfolded = !app.unfolded;
+  saveSidebar();
+}
+
+export function toggleSidebarRows() {
+  app.sidebarRows = !app.sidebarRows;
+  saveSidebar();
+}
+
 /** ⇧⌘J: show the sidebar's Fleet mode, or hide the sidebar when it's already showing it. */
 export function toggleFleet() {
-  if (app.sidebarOpen && app.sidebar === "fleet") return toggleSidebar();
-  app.sidebar = "fleet";
+  if (app.sidebarOpen && isShown("fleet")) return toggleSidebar();
+  showMode("fleet", false, true);
   if (!app.sidebarOpen) toggleSidebar();
 }
 
