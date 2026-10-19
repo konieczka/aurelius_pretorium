@@ -9,6 +9,7 @@ Scenarios for the Servers panel's database tabs, one file per phase:
 | `tests/3-writes.e2e.ts` | Write mode: the confirmation, queries that change data, cell edits that show their `UPDATE` first, why a cell can't be edited |
 | `tests/4-mongo-sqlite-agent.e2e.ts` | Mongo through `mongosh` in its container; the project's SQLite files; asking the coding agent |
 | `tests/5-terminal-links.e2e.ts` | File paths in a terminal's output as links: a file opens in a tab beside it, at its line if one is given; paths that aren't files stay text |
+| `tests/6-terminal-theme.e2e.ts` | Theme reports to a terminal's program (mode 2031, which Claude Code follows): asked for, and on each light/dark change while it's on |
 
 They use the [e2e](https://e2e.tester.army/docs) framework with exact locators only: no AI model, no sign-in.
 

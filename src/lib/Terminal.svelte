@@ -44,8 +44,18 @@
 
   // Terminals outlive their component so moving a tab or re-splitting never kills the shell.
   // The shell itself lives in the backend under the tab id and outlives this window too (reload, workspace moved).
-  type Entry = { term: Terminal; fit: FitAddon; host: HTMLDivElement; ready: boolean };
+  type Entry = { term: Terminal; fit: FitAddon; host: HTMLDivElement; ready: boolean; themeReports: boolean; send: (data: string) => void };
   const entries = new Map<string, Entry>();
+
+  // Mode 2031 (contour's dark/light reports): agents like Claude Code pick their colours from it, and follow it when the
+  // app's theme changes. xterm.js has no support for it, so a running agent kept the colours of the theme it started in.
+  const themeReport = () => `\x1b[?997;${theme.dark ? 1 : 2}n`;
+  $effect.root(() => {
+    $effect(() => {
+      const report = themeReport();
+      for (const e of entries.values()) if (e.themeReports) e.send(report);
+    });
+  });
 
   /** Drop the tab's terminal view; `kill` also ends its shell (else it keeps running for another window to attach). */
   export function disposeTerm(tabId: string, kill = true) {
@@ -173,7 +183,7 @@
     term.attachCustomKeyEventHandler((e) => !e.metaKey);
     fit.fit();
 
-    const e: Entry = { term, fit, host, ready: false };
+    const e: Entry = { term, fit, host, ready: false, themeReports: false, send: () => {} };
     const onData = new Channel<ArrayBuffer>();
     onData.onmessage = (buf) => {
       if (buf.byteLength) term.write(new Uint8Array(buf));
@@ -192,7 +202,14 @@
       .catch((err) => term.write(`\x1b[31m${err}\x1b[0m\r\n`));
     // Both fail once the shell has exited (the tab shows "[process exited]"): nothing to do about that here.
     const write = (data: string) => invoke("pty_write", { id, data }).catch(() => {});
-    term.onData((data) => e.ready && write(data));
+    e.send = (data) => e.ready && write(data);
+    term.onData(e.send);
+    // Handlers return false so xterm still handles the other modes in the same sequence.
+    const has2031 = (params: (number | number[])[]) => params.includes(2031);
+    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => (has2031(params) && (e.themeReports = true), false));
+    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => (has2031(params) && (e.themeReports = false), false));
+    term.parser.registerCsiHandler({ prefix: "?", final: "n" }, (params) => params[0] === 996 && (e.send(themeReport()), true));
+    term.parser.registerEscHandler({ final: "c" }, () => ((e.themeReports = false), false)); // `reset`, after an agent that crashed with it on
     term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }).catch(() => {}));
     // Bells and notification escapes are read by the backend (status.rs), for every shell, shown or not.
     term.onTitleChange((t) => (app.titles[tabId] = t));

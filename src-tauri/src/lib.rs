@@ -233,8 +233,8 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let s = map.get(&id).ok_or("no such pty")?;
     let mut o = s.out.lock().unwrap();
     o.input = Some(Instant::now());
-    // Answered (or dismissed). Focus reports the terminal sends by itself don't count.
-    if !matches!(data.as_str(), "\x1b[I" | "\x1b[O") {
+    // Answered (or dismissed). Focus and theme reports the terminal sends by itself don't count.
+    if !matches!(data.as_str(), "\x1b[I" | "\x1b[O" | "\x1b[?997;1n" | "\x1b[?997;2n") {
         o.asks.typed();
     }
     drop(o);
