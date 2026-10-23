@@ -136,6 +136,12 @@ export function tabsIn(id: string): L.Tab[] {
   return l ? tabsOf(l) : [];
 }
 
+/** The folder workspace `id`'s sidebar shows, wherever its layout is (see tabsIn). */
+export function folderOf(id: string): string {
+  if (id === ws.active) return app.workspace;
+  return (held.get(id) ?? loadLayout(id))?.folder ?? "";
+}
+
 /** Bring up tab `tabId` of workspace `id`: in the window that has the workspace open, else here. */
 export async function showTab(id: string, tabId: string) {
   const other = ownerWindow(id);

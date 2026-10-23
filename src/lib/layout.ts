@@ -11,7 +11,9 @@ export type Tab =
   // cookies and saved logins), settled when it first opens one ("" none); folder: the one it was opened from, until then
   | { id: string; kind: "web"; url: string; title?: string; project?: string; folder?: string }
   // a database on this machine (see db/); name: what the tab says; write: statements may change data
-  | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean };
+  | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean }
+  // the War Table: every project's agents and servers on one canvas; view: how it's laid out (Castra unless set)
+  | { id: string; kind: "war"; view?: "castra" | "front" };
 /** Where a database is: a server's port, a container (exec'd into without one), or a SQLite file. root: its project. */
 export type DbTarget = {
   engine: "postgres" | "mysql" | "redis" | "mongo" | "sqlite";
@@ -202,7 +204,7 @@ export function restore(root: Split, m: Minimized): Pane {
 type Raw = any;
 const str = (v: unknown) => typeof v === "string";
 export const isTab = (t: Raw): t is Tab =>
-  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : t.kind === "db" ? str(t.name) && str(t.target?.engine) && str(t.target?.root) : (t.kind === "file" || t.kind === "diff") && str(t.path));
+  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : t.kind === "db" ? str(t.name) && str(t.target?.engine) && str(t.target?.root) : t.kind === "war" ? true : (t.kind === "file" || t.kind === "diff") && str(t.path));
 function isNode(n: Raw): n is LNode {
   if (n?.type === "pane") return str(n.id) && Array.isArray(n.tabs) && n.tabs.every(isTab) && Number.isInteger(n.active);
   return (

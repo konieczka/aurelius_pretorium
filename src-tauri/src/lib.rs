@@ -16,6 +16,7 @@ mod logins;
 pub(crate) mod infra;
 mod mcp;
 mod skills;
+mod stats;
 mod status;
 mod usage;
 mod web;
@@ -1207,7 +1208,7 @@ pub fn run() {
                 ])?,
                 &Submenu::with_items(h, "View", true, &[
                     &item("reload", "Reload", "CmdOrCtrl+R")?, &item("force-reload", "Force Reload", "CmdOrCtrl+Shift+R")?, &P::separator(h)?,
-                    &item("key:b", "Toggle Sidebar", "CmdOrCtrl+B")?, &item("key:d", "Split Right", "CmdOrCtrl+D")?, &item("key:shift+d", "Split Down", "CmdOrCtrl+Shift+D")?, &P::separator(h)?,
+                    &item("key:b", "Toggle Sidebar", "CmdOrCtrl+B")?, &item("key:shift+y", "War Table", "CmdOrCtrl+Shift+Y")?, &item("key:d", "Split Right", "CmdOrCtrl+D")?, &item("key:shift+d", "Split Down", "CmdOrCtrl+Shift+D")?, &P::separator(h)?,
                     &item("key:l", "Open Location", "CmdOrCtrl+L")?, &item("key:[", "Back", "CmdOrCtrl+[")?, &item("key:]", "Forward", "CmdOrCtrl+]")?, &P::separator(h)?,
                     &item("zoom-reset", "Actual Size", "CmdOrCtrl+0")?, &item("zoom-in", "Zoom In", "CmdOrCtrl+=")?, &item("zoom-out", "Zoom Out", "CmdOrCtrl+-")?,
                 ])?,
@@ -1272,7 +1273,7 @@ pub fn run() {
         .manage(Awake::default())
         .manage(db::Dbs::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, existing_files, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, clipboard_image, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, existing_files, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, clipboard_image, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, stats::project_stats, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
             web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused,
             logins::web_login_answer, logins::web_login_fill, logins::web_login_forget
         ])

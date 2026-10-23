@@ -3,7 +3,7 @@ import { fmtLeft, fmtShare, fmtTokens, pace, rangeStart, summarize, type Row } f
 
 const now = new Date(2026, 9, 9, 14, 30).getTime(); // local time
 const at = (day: number, hour: number) => new Date(2026, 9, day, hour).getTime();
-const row = (r: Partial<Row>): Row => ({ provider: "claude", model: "claude-opus-5-5", session: "s1", hour: at(9, 10), uncached: 0, cached: 0, output: 0, total: 0, ...r });
+const row = (r: Partial<Row>): Row => ({ provider: "claude", model: "claude-opus-5-5", session: "s1", cwd: "", hour: at(9, 10), uncached: 0, cached: 0, output: 0, total: 0, ...r });
 
 test("range starts at local midnight", () => {
   expect(rangeStart(1, now)).toBe(at(9, 0));

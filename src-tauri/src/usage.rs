@@ -28,12 +28,14 @@ pub enum Provider {
 }
 
 /// Tokens one session spent on one model within one hour (epoch ms of the hour's start).
-/// `total` is what was processed: uncached + cached input + output.
+/// `total` is what was processed: uncached + cached input + output. `cwd`: the folder the session ran in, where its log
+/// says ("" for Grok, Antigravity and Muse, whose logs don't).
 #[derive(Clone, Default, Debug, PartialEq, Serialize)]
 pub struct Row {
     provider: Provider,
     model: String,
     session: String,
+    cwd: String,
     hour: i64,
     uncached: u64,
     cached: u64,
@@ -79,6 +81,7 @@ struct FileScan {
     rows: HashMap<(String, String, i64), Row>, // (session, model, hour)
     session: String,
     model: String,
+    cwd: String,
     seen: HashSet<String>, // Claude: message+request ids (one response is logged once per content block)
     last: [u64; 3],        // Codex: cumulative input, cached, output so far
 }
@@ -91,6 +94,7 @@ impl FileScan {
             provider,
             model: model.to_string(),
             session: self.session.clone(),
+            cwd: self.cwd.clone(),
             hour,
             ..Default::default()
         });
@@ -126,6 +130,9 @@ impl FileScan {
         if let Some(s) = v["sessionId"].as_str() {
             self.session = s.to_string();
         }
+        if let Some(c) = v["cwd"].as_str() {
+            self.cwd = c.to_string();
+        }
         let u = &msg["usage"];
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
         let (input, write, read, out) = (n("input_tokens"), n("cache_creation_input_tokens"), n("cache_read_input_tokens"), n("output_tokens"));
@@ -145,6 +152,9 @@ impl FileScan {
         if kind == "meta" {
             if let Some(m) = p["model"].as_str() {
                 self.model = m.to_string();
+            }
+            if let Some(c) = p["cwd"].as_str() {
+                self.cwd = c.to_string();
             }
             if v["type"] == "session_meta" {
                 if let Some(id) = p["id"].as_str() {
@@ -196,7 +206,7 @@ impl FileScan {
 /// Read what was appended to `path` since the last scan (all of it if it shrank, i.e. was rewritten).
 fn scan(provider: Provider, path: &Path, len: u64, f: &mut FileScan) -> std::io::Result<()> {
     if len < f.offset {
-        *f = FileScan { session: std::mem::take(&mut f.session), model: std::mem::take(&mut f.model), ..Default::default() };
+        *f = FileScan { session: std::mem::take(&mut f.session), model: std::mem::take(&mut f.model), cwd: std::mem::take(&mut f.cwd), ..Default::default() };
     }
     let mut file = std::fs::File::open(path)?;
     file.seek(SeekFrom::Start(f.offset))?;
@@ -412,7 +422,8 @@ fn antigravity_rows(f: &mut FileScan, db: &Path, fallback_at: i64) {
 fn opencode_rows(f: &mut FileScan, db: &Path) {
     let Some(msgs) = sqlite(
         db,
-        "select session_id s, time_created t, json_extract(data,'$.modelID') m, json_extract(data,'$.tokens') k \
+        "select session_id s, time_created t, json_extract(data,'$.modelID') m, json_extract(data,'$.tokens') k, \
+         (select directory from session where session.id = message.session_id) d \
          from message where json_extract(data,'$.role') = 'assistant'",
     ) else { return };
     f.rows.clear();
@@ -421,6 +432,7 @@ fn opencode_rows(f: &mut FileScan, db: &Path) {
         let n = |v: &Value| v.as_u64().unwrap_or(0);
         let (input, output, write, read) = (n(&k["input"]), n(&k["output"]) + n(&k["reasoning"]), n(&k["cache"]["write"]), n(&k["cache"]["read"]));
         f.session = m["s"].as_str().unwrap_or("").to_string();
+        f.cwd = m["d"].as_str().unwrap_or("").to_string();
         f.add(Provider::OpenCode, m["m"].as_str().unwrap_or("opencode"), m["t"].as_i64().unwrap_or(0), input + write, read, output, input + write + read + output);
     }
 }
@@ -867,7 +879,7 @@ mod tests {
 
     fn claude_line(id: &str, out: u64) -> String {
         format!(
-            r#"{{"sessionId":"s1","requestId":"r","timestamp":"2026-10-09T02:18:07.762Z","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":100,"output_tokens":{out}}}}}}}"#
+            r#"{{"sessionId":"s1","cwd":"/w/app","requestId":"r","timestamp":"2026-10-09T02:18:07.762Z","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":100,"output_tokens":{out}}}}}}}"#
         )
     }
 
@@ -882,6 +894,7 @@ mod tests {
         let r = rows[0];
         assert_eq!((r.uncached, r.cached, r.output, r.total), (24, 200, 12, 236));
         assert_eq!(r.session, "s1");
+        assert_eq!(r.cwd, "/w/app");
         assert_eq!(r.hour, 1_791_511_200_000);
     }
 

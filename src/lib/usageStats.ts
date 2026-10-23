@@ -4,7 +4,7 @@ export type Provider = "claude" | "codex" | "grok" | "antigravity" | "opencode" 
 export const PROVIDERS: Provider[] = ["claude", "codex", "grok", "antigravity", "opencode", "muse"]; // fixed order: it also fixes their colors
 export const providerName: Record<Provider, string> = { claude: "Claude Code", codex: "Codex", grok: "Grok Build", antigravity: "Antigravity", opencode: "OpenCode", muse: "Muse Code" };
 
-export type Row = { provider: Provider; model: string; session: string; hour: number; uncached: number; cached: number; output: number; total: number };
+export type Row = { provider: Provider; model: string; session: string; cwd: string; hour: number; uncached: number; cached: number; output: number; total: number };
 export type Limit = { provider: Provider; label: string; used: number; resetsAt: number | null; windowMinutes: number | null; note: string | null };
 
 export type Totals = { processed: number; cached: number; uncached: number; output: number };

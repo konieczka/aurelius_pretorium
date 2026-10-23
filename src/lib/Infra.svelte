@@ -42,6 +42,13 @@
     return () => (clearInterval(t), window.removeEventListener("focus", refreshInfra));
   }
 
+  // Databases, caches and queues: there's no page to open on their ports.
+  const NOT_WEB = new Set([5432, 3306, 6379, 27017, 11211, 5672, 1433, 1521, 9042, 2181, 9092, 26257, 4222, 6380, 33060]);
+  const DATABASES = ["postgres", "redis-server", "valkey-server", "mysqld", "mariadbd", "mongod", "memcached", "rabbitmq-server", "clickhouse"];
+  /** The port a server's page is on, if it has one. */
+  export const webPort = (l: Listener) => (DATABASES.includes(l.name) ? undefined : l.ports.find((p) => !NOT_WEB.has(p)));
+  export const webContainerPort = (c: Container) => (c.state === "running" ? c.ports.find((p) => !NOT_WEB.has(p.inner))?.host : undefined);
+
   /** Is `root` the workspace's folder, one in it, or one it's in? */
   export const near = (root: string, ws = app.workspace) => !!root && (root === ws || ws.startsWith(root + "/") || root.startsWith(ws + "/"));
 
@@ -62,10 +69,6 @@
   import { showTab, tabsIn, ws } from "./workspaces.svelte";
 
   type Group = { key: string; title: string; hint: string; listeners: Listener[]; containers: Container[] };
-
-  // Databases, caches and queues: there's no page to open on their ports.
-  const NOT_WEB = new Set([5432, 3306, 6379, 27017, 11211, 5672, 1433, 1521, 9042, 2181, 9092, 26257, 4222, 6380, 33060]);
-  const DATABASES = ["postgres", "redis-server", "valkey-server", "mysqld", "mariadbd", "mongod", "memcached", "rabbitmq-server", "clickhouse"];
 
   let closed = $state<Record<string, boolean>>({});
   $effect(() => void refreshInfra()); // switching to the mode shows what's up now, not 15s ago
@@ -134,8 +137,6 @@
   }
 
   const where = (l: Listener) => (l.root && l.cwd !== l.root && l.cwd.startsWith(l.root + "/") ? l.cwd.slice(l.root.length + 1) : "");
-  const webPort = (l: Listener) => (DATABASES.includes(l.name) ? undefined : l.ports.find((p) => !NOT_WEB.has(p)));
-  const webContainerPort = (c: Container) => (c.state === "running" ? c.ports.find((p) => !NOT_WEB.has(p.inner))?.host : undefined);
   const workspaceOf = (tab: string) => ws.all.find((m) => tabsIn(m.id).some((t) => t.id === tab))?.id;
   const fail = (e: unknown) => message(String(e), { kind: "error" });
 
