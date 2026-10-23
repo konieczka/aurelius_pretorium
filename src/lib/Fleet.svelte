@@ -26,6 +26,7 @@
   };
   const groups = $derived(byProject(rows, projectOf));
   const count = (s: Status) => rows.filter((r) => r.status === s).length;
+  const tally = (rs: Row[]) => STATUSES.map((s) => [s, rs.filter((r) => r.status === s).length] as const).filter(([, n]) => n);
 
   const heading: Record<Status, string> = { attention: "Needs you", busy: "Working", idle: "Idle", asleep: "Not started" };
 
@@ -74,7 +75,7 @@
 <div class="fleet">
   {#if rows.length}
     <p class="sum">
-      {#each STATUSES.filter(count) as s, i (s)}{i ? " · " : ""}<span class:hot={s === "attention"}>{count(s)} {heading[s].toLowerCase()}</span>{/each}
+      {#each STATUSES.filter(count) as s (s)}<span class="tally" class:hot={s === "attention"}><span class="glyph {s}"></span>{count(s)} {heading[s].toLowerCase()}</span>{/each}
     </p>
   {:else}
     <div class="empty">
@@ -84,26 +85,32 @@
   {/if}
 
   {#each groups as g (g.key)}
-    <section>
-      <h3 title={g.key}><span class="pname">{base(g.key)}</span><span class="n">{g.rows.length}</span></h3>
-      <div class="cards">
+    <!-- A card per project; its head counts the agents by state, in the same marks as the rows -->
+    <section class="project" class:waiting={g.rows.some((r) => r.status === "attention")}>
+      <h3 title={g.key}>
+        <span class="pname">{base(g.key)}</span>
+        <span class="counts">
+          {#each tally(g.rows) as [s, n] (s)}<span class="tally" title="{n} {heading[s].toLowerCase()}"><span class="glyph {s}"></span>{n}</span>{/each}
+        </span>
+      </h3>
+      <div class="rows">
         {#each g.rows as r (r.id)}
           {@const n = name(r)}
           {@const w = where(r)}
           {@const a = waitsFor(r)}
           {@const repo = app.repos[r.cwd]}
-          <!-- The whole card jumps to the terminal: a button laid over it, under the End button -->
-          <div class="card" class:waiting={r.status === "attention"} class:asleep={r.status === "asleep"} title={hint(r)}>
+          <!-- The whole row jumps to the terminal: a button laid over it, under the End button -->
+          <div class="row {r.status}" class:prompt={r.asking} title={hint(r)}>
             {#if r.ws}<button class="main" onclick={() => r.ws && showTab(r.ws, r.id)} aria-label="Go to {n.title} in {w.text}"></button>{/if}
-            <span class="agent" class:working={r.status === "busy" && !r.asking}>
-              {#if agentProvider[r.agent]}<ProviderIcon provider={agentProvider[r.agent]} size={14} />{/if}
+            <span class="mark">
+              {#if agentProvider[r.agent]}<ProviderIcon provider={agentProvider[r.agent]} size={13} />{/if}
             </span>
             <span class="title">{n.title}</span>
             {#if r.ws}<span class="when">{when(r)}</span>
             {:else}<button class="end" onclick={() => end(r)} title="End this terminal" aria-label="End {n.title}"><X size={12} strokeWidth={1.5} /></button>{/if}
             {#if a}
-              <span class="ask" class:prompt={r.asking}>
-                {#if a.icon}<a.icon size={12} strokeWidth={2} />{:else}<span class="dot"></span>{/if}{a.text}
+              <span class="ask">
+                {#if a.icon}<a.icon size={12} strokeWidth={2} />{/if}{a.text}
               </span>
             {/if}
             <span class="loc">
@@ -119,14 +126,30 @@
 </div>
 
 <style>
+  /* Three states, three channels, so they read apart even without colour: waiting is a still ember (filled, the row
+     tinted), working is gold and moves (an arc circles the icon), idle is a plain hairline and a dimmed icon. Not
+     started is idle's dashed outline. */
   .fleet {
+    --ember: oklch(0.68 0.18 52);
+    --ember-ink: oklch(0.52 0.16 48);
+    --ember-wash: oklch(0.7 0.17 50 / 9%);
+    --ember-edge: oklch(0.7 0.17 50 / 42%);
     display: flex;
     flex-direction: column;
     gap: 10px;
     padding: 2px 0 12px;
     font-size: 13px;
   }
+  :global(.dark) .fleet {
+    --ember: oklch(0.78 0.16 58);
+    --ember-ink: oklch(0.82 0.13 60);
+    --ember-wash: oklch(0.75 0.16 55 / 11%);
+    --ember-edge: oklch(0.75 0.16 55 / 40%);
+  }
   .sum {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     margin: 0;
     padding: 0 6px;
     color: var(--muted-foreground);
@@ -151,56 +174,119 @@
   code {
     font-size: 11.5px;
   }
-  /* Like Source Control's section heads */
+
+  /* The state marks, small (tallies) */
+  .tally {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .glyph {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    box-sizing: border-box;
+    border-radius: 9999px;
+  }
+  .glyph.attention {
+    background: var(--ember);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ember) 22%, transparent);
+  }
+  .glyph.busy {
+    border: 1.5px solid var(--gold);
+    background: color-mix(in oklch, var(--gold) 30%, transparent);
+  }
+  .glyph.idle {
+    border: 1.5px solid var(--faint);
+  }
+  .glyph.asleep {
+    border: 1.5px dotted var(--faint);
+    opacity: 0.7;
+  }
+
+  /* A card per project: rows sit 4px inside it, so their corners stay concentric with its own */
+  .project {
+    --r-card: 14px;
+    padding: 0 4px 4px;
+    border-radius: var(--r-card);
+    background: var(--card);
+    box-shadow: inset 0 1px 0 var(--hl), 0 0 0 1px oklch(var(--shadow-tint) / 0.09), 0 6px 16px -12px oklch(var(--shadow-tint) / 0.35);
+    transition: box-shadow var(--dur-base) var(--ease-out-quint);
+  }
+  .project.waiting {
+    box-shadow: inset 0 1px 0 var(--hl), 0 0 0 1px var(--ember-edge), 0 6px 18px -12px color-mix(in oklch, var(--ember) 55%, transparent);
+  }
   h3 {
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 24px;
+    gap: 8px;
+    height: 32px;
     margin: 0;
-    padding: 0 6px;
-    color: var(--muted-foreground);
-    font-size: 11px;
+    padding: 0 8px;
+    color: var(--foreground);
+    font-size: 12.5px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
   }
   .pname {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .n {
+  .counts {
+    display: flex;
+    flex: none;
+    gap: 9px;
+    color: var(--muted-foreground);
+    font-size: 11.5px;
     font-weight: 500;
   }
-  .cards {
+  .rows {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
   }
-  /* A card per agent, as tall as it needs: mark · what it's on (all of it) · how long / what it waits on you for / where
+
+  /* A row per agent, as tall as it needs: mark · what it's on (all of it) · how long / what it waits on you for / where
    it is, and on which branch */
-  .card {
+  .row {
     position: relative;
     display: grid;
-    grid-template-columns: 14px minmax(0, 1fr) auto;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
     align-items: start;
-    column-gap: 8px;
-    row-gap: 4px;
-    padding: 8px 8px 8px 9px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--card);
+    column-gap: 9px;
+    row-gap: 3px;
+    padding: 7px 8px 8px 6px;
+    border-radius: calc(var(--r-card) - 4px);
     color: var(--sidebar-foreground);
-    transition: background-color var(--dur-quick) var(--ease-standard);
+    transition: background-color var(--dur-quick) var(--ease-out-quint);
   }
-  .card.waiting {
-    border-color: oklch(0.7 0.17 50 / 45%);
+  /* Hairlines between rows, from the text column on; none next to a tinted or hovered row */
+  .row + .row::before {
+    content: "";
+    position: absolute;
+    top: -1.5px;
+    left: 37px;
+    right: 8px;
+    height: 1px;
+    background: var(--border);
+    opacity: 0.55;
   }
-  .card.asleep > :not(.main) {
+  .row.attention::before,
+  .row.attention + .row::before,
+  .row:has(.main:hover)::before,
+  .row:has(.main:hover) + .row::before {
+    opacity: 0;
+  }
+  .row.attention {
+    background: var(--ember-wash);
+  }
+  .row.asleep > :not(.main, .mark) {
     opacity: 0.6;
   }
-  .card > :not(.main, .end) {
+  .row > :not(.main, .end) {
     pointer-events: none;
   }
   .main {
@@ -211,67 +297,129 @@
     background: none;
     cursor: pointer;
   }
-  .card:has(.main:hover),
-  .card:has(.main:focus-visible) {
-    background: var(--accent);
+  .row:has(.main:hover),
+  .row:has(.main:focus-visible) {
+    background: var(--hover);
   }
-  .card:has(.main:focus-visible) {
+  .row.attention:has(.main:hover) {
+    background: color-mix(in oklch, var(--ember-wash), var(--ember) 7%);
+  }
+  .row:has(.main:focus-visible) {
     box-shadow: 0 0 0 2px var(--gold-ring);
   }
   .main:focus-visible {
     outline: none;
   }
-  .agent {
-    display: flex;
-    height: 18px;
-    align-items: center;
+
+  /* The state mark, large: the agent's icon in a round socket */
+  .mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-top: -2px;
+    border-radius: 9999px;
   }
+  .mark::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    border-radius: inherit;
+  }
+  .mark :global(svg) {
+    position: relative;
+  }
+  .idle .mark::before {
+    border: 1px solid var(--border-strong);
+  }
+  .idle .mark :global(svg) {
+    opacity: 0.6;
+    filter: saturate(0.4);
+  }
+  .asleep .mark::before {
+    border: 1px dashed var(--border-strong);
+  }
+  .asleep .mark :global(svg) {
+    opacity: 0.4;
+    filter: grayscale(1);
+  }
+  .attention .mark {
+    background: color-mix(in oklch, var(--ember) 16%, transparent);
+  }
+  .attention .mark::before {
+    border: 1.5px solid var(--ember);
+  }
+  /* Working: a gold arc runs round the socket (a conic sweep, masked to a ring), over a faint full ring */
+  .busy .mark {
+    background: color-mix(in oklch, var(--gold) 10%, transparent);
+  }
+  .busy .mark::before {
+    border: 1px solid color-mix(in oklch, var(--gold) 40%, transparent);
+  }
+  .busy .mark::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 2px;
+    border-radius: inherit;
+    background: conic-gradient(from 0deg, transparent 0 35%, color-mix(in oklch, var(--gold) 45%, transparent) 65%, var(--gold) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: orbit 1.6s cubic-bezier(0.45, 0.15, 0.35, 0.85) infinite;
+  }
+  @keyframes orbit {
+    to {
+      transform: rotate(1turn);
+    }
+  }
+
   .title {
     font-weight: 500;
     line-height: 18px;
     overflow-wrap: anywhere;
   }
-  .when {
+  .idle .title {
     color: var(--muted-foreground);
+  }
+  .when {
+    color: var(--faint);
     font-size: 11.5px;
     line-height: 18px;
     font-variant-numeric: tabular-nums;
   }
-  .card.waiting .when {
-    color: var(--foreground);
+  .busy .when {
+    color: var(--muted-foreground);
+  }
+  .attention .when {
+    color: var(--ember-ink);
+    font-weight: 500;
   }
   .ask,
   .loc {
     grid-column: 2 / -1;
   }
-  /* What it waits on you for: a prompt in the ember of the attention dots, a finished turn quieter */
+  /* What it waits on you for: a prompt as a pill in ember, a finished turn as plain ember text */
   .ask {
     display: flex;
     align-items: center;
     gap: 5px;
     justify-self: start;
-    color: var(--foreground);
+    color: var(--ember-ink);
     font-size: 12px;
     font-weight: 500;
   }
-  .ask.prompt {
+  .prompt .ask {
+    margin: 1px 0;
     padding: 2px 8px 2px 6px;
     border-radius: 9999px;
-    background: oklch(0.7 0.17 50 / 16%);
-    color: oklch(0.55 0.16 50);
-  }
-  :global(.dark) .ask.prompt {
-    color: oklch(0.8 0.14 55);
+    background: color-mix(in oklch, var(--ember) 17%, transparent);
   }
   .ask :global(svg) {
     flex: none;
-  }
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 9999px;
-    background: oklch(0.7 0.17 50);
-    box-shadow: 0 0 0 2px oklch(0.7 0.17 50 / 25%);
   }
   .loc {
     display: flex;
@@ -281,6 +429,9 @@
     color: var(--muted-foreground);
     font-size: 11.5px;
     white-space: nowrap;
+  }
+  .idle .loc {
+    color: var(--faint);
   }
   .ws,
   .dir {
@@ -321,25 +472,12 @@
     background: var(--hover);
     color: var(--foreground);
   }
-  /* Same mark as the tabs: the icon breathes while working */
-  .agent.working :global(svg) {
-    animation: breathe 2.4s ease-in-out infinite;
-  }
-  @keyframes breathe {
-    0%,
-    100% {
-      opacity: 0.55;
-      filter: none;
-    }
-    50% {
-      opacity: 1;
-      filter: drop-shadow(0 0 3px color-mix(in oklch, var(--gold) 70%, transparent));
-    }
-  }
+  /* The global reduced-motion rule shortens animations to 1ms, which would make an infinite one strobe: the arc
+     becomes a still, full gold ring */
   @media (prefers-reduced-motion: reduce) {
-    .agent.working :global(svg) {
+    .busy .mark::after {
       animation: none;
-      filter: drop-shadow(0 0 2px color-mix(in oklch, var(--gold) 70%, transparent));
+      background: var(--gold);
     }
   }
 </style>
