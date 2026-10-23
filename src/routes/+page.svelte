@@ -8,7 +8,7 @@
   import QuickPick, { pick } from "$lib/QuickPick.svelte";
   import Toast from "$lib/Toast.svelte";
   import Notices from "$lib/Notices.svelte";
-  import FileTree, { treeMenu } from "$lib/FileTree.svelte";
+  import FileTree, { treeDragOver, treeDrop, treeMenu } from "$lib/FileTree.svelte";
   import { hasPreview } from "$lib/media";
   import WorkspaceBar from "$lib/WorkspaceBar.svelte";
   import { initWorkspaces, save } from "$lib/workspaces.svelte";
@@ -34,7 +34,7 @@
   import Settings from "$lib/Settings.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, moveInto, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
+    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
     isShown, showMode, sidebarModes, toggleSidebarRows, toggleUnfold, type SidebarMode,
   } from "$lib/state.svelte";
 
@@ -171,17 +171,9 @@
       onclick={(e) => e.target === e.currentTarget && (app.selectedDir = app.workspace)}
       oncontextmenu={(e) => treeMenu(e, app.workspace, true)}
       onkeydown={() => {}}
-      ondragover={(e) => {
-        if (!e.dataTransfer?.types.includes("text/x-path")) return;
-        e.preventDefault();
-        app.dropDir = app.workspace;
-      }}
-      ondragleave={(e) => e.target === e.currentTarget && (app.dropDir = "")}
-      ondrop={(e) => {
-        const from = e.dataTransfer?.getData("text/x-path");
-        app.dropDir = "";
-        if (from) moveInto(from, app.workspace);
-      }}
+      ondragover={(e) => treeDragOver(e, app.workspace)}
+      ondragleave={(e) => !e.currentTarget.contains(e.relatedTarget as Element | null) && (app.dropDir = "")}
+      ondrop={(e) => treeDrop(e, app.workspace)}
     >
       {#key app.workspace}<FileTree path={app.workspace} />{/key}
     </div>

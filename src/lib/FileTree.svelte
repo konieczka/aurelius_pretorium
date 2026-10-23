@@ -1,7 +1,45 @@
 <script module lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
+  import { message } from "@tauri-apps/plugin-dialog";
   import { popupMenu, sep } from "./contextMenu";
-  import { app, clipboardFiles, clipFile, copyText, deleteSelected, finishCreate, finishRename, moveInto, openFile, paste, startCreate } from "./state.svelte";
+  import {
+    addFiles, app, clipboardFiles, clipFile, copyText, deleteSelected, droppedPaths, finishCreate, finishRename, markDragTarget, moveInto, openFile,
+    paste, startCreate, takeDragTarget,
+  } from "./state.svelte";
+
+  // Drag and drop onto folder `dir` (a row, or the sidebar's empty space for the root): a tree entry moves there,
+  // files from Finder etc. are copied in.
+  const isTreeDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.includes("text/x-path");
+  const isOutsideDrag = (ev: DragEvent) => !!ev.dataTransfer?.types.includes("Files") && !isTreeDrag(ev);
+  export function treeDragOver(ev: DragEvent, dir: string) {
+    const outside = isOutsideDrag(ev);
+    if (!outside && !isTreeDrag(ev)) return;
+    ev.preventDefault();
+    ev.stopPropagation(); // innermost row wins over the sidebar's root drop zone
+    if (outside) {
+      ev.dataTransfer!.dropEffect = "copy";
+      markDragTarget("tree", dir);
+    }
+    app.dropDir = dir;
+  }
+  export async function treeDrop(ev: DragEvent, dir: string) {
+    const outside = isOutsideDrag(ev);
+    const from = ev.dataTransfer?.getData("text/x-path");
+    if (!outside && !from) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    app.dropDir = "";
+    if (from) return moveInto(from, dir);
+    const paths = await droppedPaths(ev.dataTransfer!).catch((e) => (message(`Couldn't drop the file: ${e}`, { kind: "error" }), []));
+    await addFiles(paths, dir);
+  }
+  // Screenshot thumbnails never get a `drop` (see catch_promise_drops): the backend sends their paths.
+  listen<string[]>("promise-drop", ({ payload }) => {
+    const dir = takeDragTarget("tree");
+    app.dropDir = "";
+    if (dir) addFiles(payload, dir);
+  });
 
   /** VS Code-style right-click menu for a tree entry (or the workspace root: no cut/copy/rename/delete). */
   export async function treeMenu(ev: MouseEvent, path: string, isDir: boolean) {
@@ -53,22 +91,6 @@
     invoke<Entry[]>("list_dir", { path }).then((e) => (entries = e), () => (entries = []));
   });
 
-  // Tree drag and drop: drop on a folder moves into it, on a file moves next to it.
-  const isTreeDrag = (ev: DragEvent) => ev.dataTransfer?.types.includes("text/x-path");
-  function over(ev: DragEvent, dir: string) {
-    if (!isTreeDrag(ev)) return;
-    ev.preventDefault();
-    ev.stopPropagation(); // innermost row wins over the sidebar's root drop zone
-    app.dropDir = dir;
-  }
-  function drop(ev: DragEvent, dir: string) {
-    const from = ev.dataTransfer?.getData("text/x-path");
-    if (!from) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    app.dropDir = "";
-    moveInto(from, dir);
-  }
 </script>
 
 {#snippet icon(name: string, isDir: boolean, open = false)}
@@ -136,8 +158,8 @@
         draggable="true"
         ondragstart={(ev) => ev.dataTransfer?.setData("text/x-path", full)}
         ondragend={() => (app.dropDir = "")}
-        ondragover={(ev) => over(ev, dir)}
-        ondrop={(ev) => drop(ev, dir)}
+        ondragover={(ev) => treeDragOver(ev, dir)}
+        ondrop={(ev) => treeDrop(ev, dir)}
         oncontextmenu={(ev) => treeMenu(ev, full, e.is_dir)}
         onclick={() => {
           app.selectedDir = dir;

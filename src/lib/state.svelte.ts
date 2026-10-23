@@ -467,30 +467,78 @@ export async function clipFile(path: string, cut: boolean) {
 
 export const clipboardFiles = () => invoke<string[]>("clipboard_files");
 
-/** Paste the clipboard's files (from the tree, Finder...) into `dir`: our own Cut moves, the rest is copied. */
+/** Paste the clipboard's files (from the tree, Finder...) into `dir`: our own Cut moves, the rest is copied.
+ * No files but an image (a screenshot, a browser's Copy Image) is saved as "Pasted image.png". */
 export async function paste(dir: string) {
-  for (const from of await clipboardFiles()) {
-    if (from === app.cut) {
-      app.cut = "";
-      await moveInto(from, dir);
+  const files = await clipboardFiles();
+  if (!files.length) {
+    let path: string | null;
+    try {
+      path = await invoke<string | null>("clipboard_image", { dir });
+    } catch (e) {
+      return fail(e);
+    }
+    if (path) added(path, dir);
+    return;
+  }
+  const copies: string[] = [];
+  for (const from of files) {
+    if (from !== app.cut) {
+      copies.push(from);
       continue;
     }
+    app.cut = "";
+    await moveInto(from, dir);
+  }
+  await addFiles(copies, dir);
+}
+
+/** Copy files or folders (pasted, or dropped from Finder) into `dir`. */
+export async function addFiles(paths: string[], dir: string) {
+  for (const from of paths) {
     if (under(dir, from)) {
       fail("Can't paste a folder into itself.");
       continue;
     }
-    let path: string;
     try {
-      path = await invoke<string>("copy_path", { from, dir });
+      added(await invoke<string>("copy_path", { from, dir }), dir);
     } catch (e) {
       fail(e);
-      continue;
     }
-    record({ kind: "create", path });
-    app.expanded[dir] = true;
-    app.selectedPath = path;
-    app.treeVersion++;
   }
+}
+
+function added(path: string, dir: string) {
+  record({ kind: "create", path });
+  app.expanded[dir] = true;
+  app.selectedPath = path;
+  app.treeVersion++;
+}
+
+/** Paths of files dropped from outside (Finder etc.). The webview only hands over the files' contents, so their paths
+ * come from the drag pasteboard; a file without one (an image from a browser) is saved to a temp folder first. */
+export async function droppedPaths(dt: DataTransfer): Promise<string[]> {
+  const files = [...dt.files];
+  if (!files.length) return [];
+  const known = await invoke<string[]>("drag_files").catch(() => [] as string[]);
+  return Promise.all(
+    files.map(
+      async (f) =>
+        known.find((p) => p.slice(p.lastIndexOf("/") + 1) === f.name) ??
+        invoke<string>("save_drop", await f.arrayBuffer(), { headers: { name: encodeURIComponent(f.name) } }),
+    ),
+  );
+}
+
+/** What a file drag was last over (a terminal tab, or a tree folder), for the drops that never reach the page
+ * (screenshot thumbnails: the backend sends them as "promise-drop"). */
+export const dragTarget = { kind: "", id: "", at: 0 };
+export const markDragTarget = (kind: "term" | "tree", id: string) => Object.assign(dragTarget, { kind, id, at: performance.now() });
+/** The target of a drag that just ended, if it was a `kind` (taken: one drop goes to one place). */
+export function takeDragTarget(kind: "term" | "tree") {
+  const hit = dragTarget.kind === kind && performance.now() - dragTarget.at < 1000;
+  dragTarget.kind = "";
+  return hit ? dragTarget.id : "";
 }
 
 /** Resolves to whether it worked (a failure is shown). */

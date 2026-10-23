@@ -49,8 +49,8 @@ rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSString", "NSURL", "NSValue"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSString", "NSURL", "NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSBitmapImageRep", "NSImageRep", "NSPasteboard"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKContentWorld", "WKFrameInfo", "WKScriptMessage", "WKScriptMessageHandlerWithReply", "WKSecurityOrigin", "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration"] }
 block2 = "0.6"
 

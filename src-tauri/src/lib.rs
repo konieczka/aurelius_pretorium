@@ -788,16 +788,57 @@ fn copy_into(from: String, dir: String) -> Res<String> {
         Some(i) if i > 0 && !src.is_dir() => (&name[..i], &name[i..]),
         _ => (name.as_str(), ""),
     };
-    let to = (0..)
-        .map(|n| Path::new(&dir).join(match n {
-            0 => name.clone(),
+    let to = free_name(&dir, stem, ext);
+    copy_rec(src, &to).map_err(err)?;
+    Ok(to.to_string_lossy().into_owned())
+}
+
+/// The first of "a.txt", "a copy.txt", "a copy 2.txt"... not taken in `dir`.
+fn free_name(dir: &str, stem: &str, ext: &str) -> std::path::PathBuf {
+    (0..)
+        .map(|n| Path::new(dir).join(match n {
+            0 => format!("{stem}{ext}"),
             1 => format!("{stem} copy{ext}"),
             _ => format!("{stem} copy {n}{ext}"),
         }))
         .find(|p| !p.exists())
-        .unwrap();
-    copy_rec(src, &to).map_err(err)?;
-    Ok(to.to_string_lossy().into_owned())
+        .unwrap()
+}
+
+/// An image on the system clipboard (a screenshot, a browser's Copy Image) saved into `dir` as "Pasted image.png".
+/// Returns its path, or None when the clipboard has no image.
+#[tauri::command]
+async fn clipboard_image(dir: String) -> Res<Option<String>> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(png) = clipboard_png() else { return Ok(None) };
+        blocking(move || {
+            let to = free_name(&dir, "Pasted image", ".png");
+            std::fs::write(&to, png).map_err(err)?;
+            Ok(Some(to.to_string_lossy().into_owned()))
+        })
+        .await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = dir;
+        Ok(None)
+    }
+}
+
+/// The clipboard's image as PNG bytes: as is when it has a PNG, converted when it only has a TIFF.
+#[cfg(target_os = "macos")]
+fn clipboard_png() -> Option<Vec<u8>> {
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+    use objc2_foundation::NSDictionary;
+    let pb = NSPasteboard::generalPasteboard();
+    if let Some(png) = unsafe { pb.dataForType(NSPasteboardTypePNG) } {
+        return Some(png.to_vec());
+    }
+    let tiff = unsafe { pb.dataForType(NSPasteboardTypeTIFF) }?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+    let png = unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new()) }?;
+    Some(png.to_vec())
 }
 
 fn copy_rec(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -1231,7 +1272,7 @@ pub fn run() {
         .manage(Awake::default())
         .manage(db::Dbs::default())
         .invoke_handler(tauri::generate_handler![
-            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, existing_files, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
+            follow_cursor, mouse_down, pty_open, pty_write, pty_resize, pty_kill, pty_status, list_dir, read_file, open_file, file_stamp, existing_files, write_file, quit, allow_asset, show_window, create_file, create_dir, move_path, copy_path, clipboard_set_file, clipboard_files, clipboard_image, drag_files, save_drop, reveal_path, open_url, trash_path, git, stay_awake, sound_cues, usage::usage_stats, usage::usage_limits, infra::infra_scan, infra::infra_recipes, infra::infra_stop, infra::infra_docker, db::db_connect, db::db_disconnect, db::db_tree, db::db_rows, db::db_query, db::db_cancel, db::db_edit, db::db_completion, db::db_keys, db::db_value, db::db_command, db::db_files, skills::skills_scan, skills::skill_create, skills::skill_link, skills::skill_delete, mcp::mcp_scan, mcp::mcp_reveal, mcp::mcp_add, mcp::mcp_copy, mcp::mcp_update, mcp::mcp_remove, mcp::mcp_set_enabled, agent_config::agent_configs, agent_config::agent_launchers, agent_config::agent_config_save, agent_config::agent_config_set,
             web::web_show, web::web_hide, web::web_close, web::web_hide_all, web::web_navigate, web::web_go, web::web_reload, web::web_stop, web::web_focus, web::web_focused,
             logins::web_login_answer, logins::web_login_fill, logins::web_login_forget
         ])
@@ -1362,6 +1403,7 @@ mod tests {
         let copied = super::copy_into(sub, dir).unwrap();
         assert!(copied.ends_with("sub copy"));
         assert_eq!(std::fs::read_to_string(format!("{copied}/a copy 2.txt")).unwrap(), "hi");
+        assert!(super::free_name(&copied, "Pasted image", ".png").ends_with("Pasted image.png"));
         std::fs::remove_dir_all(&base).unwrap();
     }
 }
