@@ -10,6 +10,8 @@ import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
 import { closeAgents } from "./agentsView.svelte";
 import { closeSettings } from "./settingsView.svelte";
+import { closeMcp } from "./mcpView.svelte";
+import { closeWar } from "./warView.svelte";
 import { draftOf, queueDraft } from "./Editor.svelte";
 import { shells } from "./agents.svelte";
 import { applyWorkspacePalette, cssHex, theme } from "./theme.svelte";
@@ -44,6 +46,7 @@ const loadMeta = (): Meta[] => {
 };
 function loadLayout(id: string): Layout | null {
   const l = load<Partial<Layout> | null>("ws:" + id, null);
+  if (l) L.dropRetired(l.root);
   if (!l || !L.isRoot(l.root)) return null;
   return {
     folder: typeof l.folder === "string" ? l.folder : "",
@@ -154,7 +157,7 @@ export async function showTab(id: string, tabId: string) {
 }
 
 function reveal(tabId: string) {
-  closeUsage(), closeSkills(), closeAgents(), closeSettings(); // the panes come back from a full-page view
+  closeUsage(), closeSkills(), closeAgents(), closeSettings(), closeMcp(), closeWar(); // the panes come back from a full-page view
 
   if (app.minimized.some((m) => m.tab.id === tabId)) restoreTab(tabId);
   else activateTab(tabId);

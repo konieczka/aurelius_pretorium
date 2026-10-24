@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Plug, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, X } from "@lucide/svelte";
+  import { Bell, BellOff, Brain, Flame, Gauge, LayoutGrid, Monitor, Moon, Plug, Sun, PanelLeft, PanelLeftClose, Plus, Settings, SlidersHorizontal, Swords, X } from "@lucide/svelte";
   import { PALETTES, setMode, theme, type Mode, type Palette } from "./theme.svelte";
   import { paletteName } from "./palette";
   import { settings, toggleSettings } from "./settingsView.svelte";
@@ -9,6 +9,7 @@
   import { skills, toggleSkills } from "./skillsView.svelte";
   import { mcp, toggleMcp } from "./mcpView.svelte";
   import { agents, toggleAgents } from "./agentsView.svelte";
+  import { toggleWar, war } from "./warView.svelte";
   import { activity, shells } from "./agents.svelte";
   import { app, arrangePanes, toggleSidebar } from "./state.svelte";
   import { pick } from "./QuickPick.svelte";
@@ -208,6 +209,16 @@
   </button>
   <button class="icon-btn" onclick={cycleTheme} title="Theme: {modes[theme.mode].label} (next: {modes[nextMode[theme.mode]].label})" aria-label="Theme: {modes[theme.mode].label}">
     <ThemeIcon size={14} strokeWidth={1.5} />
+  </button>
+  <button
+    class="icon-btn view"
+    class:on={war.open}
+    onclick={toggleWar}
+    title="War Table: every project's agents and servers on one canvas (⇧⌘Y)"
+    aria-label="War Table"
+    aria-pressed={war.open}
+  >
+    <Swords size={14} strokeWidth={1.5} />
   </button>
   <span class="sep"></span>
   <button

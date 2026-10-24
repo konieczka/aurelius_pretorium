@@ -142,3 +142,16 @@ test("stored layouts are checked before use", async () => {
   expect(isMinimized({ tab: t("a"), pane: "p", index: 0 })).toBe(true);
   expect(isMinimized({ tab: t("a"), pane: "p" })).toBe(false);
 });
+
+test("War Table tabs come out of stored layouts, and the panes they leave empty with them", async () => {
+  const { dropRetired, isRoot } = await import("./layout");
+  const war = { id: "w", kind: "war" } as unknown as Tab;
+  const root = rootWith(pane([t("a"), war]));
+  root.children[0] = { ...(root.children[0] as ReturnType<typeof pane>), active: 1 };
+  split(root, root.children[0].id, "row", war); // [a, war | war]
+  const stored = JSON.parse(JSON.stringify(root));
+  expect(isRoot(stored)).toBe(false);
+  dropRetired(stored);
+  expect(isRoot(stored)).toBe(true);
+  expect(panes(stored).map((p) => [p.tabs.map((x) => x.id), p.active])).toEqual([[["a"], 0]]);
+});

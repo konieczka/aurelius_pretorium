@@ -5,6 +5,7 @@ import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
 import { closeAgents } from "./agentsView.svelte";
 import { closeSettings } from "./settingsView.svelte";
+import { closeWar } from "./warView.svelte";
 
 // The MCP view stands in for this window's panes while open, like Skills, Usage and Agents (they take turns). Per window, not saved.
 export const mcp = $state({
@@ -23,7 +24,7 @@ export const mcp = $state({
 
 export function toggleMcp() {
   mcp.open = !mcp.open;
-  if (mcp.open) (closeUsage(), closeSkills(), closeAgents(), closeSettings());
+  if (mcp.open) (closeUsage(), closeSkills(), closeAgents(), closeSettings(), closeWar());
   else closeMcp();
 }
 export const closeMcp = () => {

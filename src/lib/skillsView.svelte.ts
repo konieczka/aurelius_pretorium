@@ -6,6 +6,7 @@ import { closeUsage } from "./usageView.svelte";
 import { closeAgents } from "./agentsView.svelte";
 import { closeSettings } from "./settingsView.svelte";
 import { closeMcp } from "./mcpView.svelte";
+import { closeWar } from "./warView.svelte";
 
 // The Skills view stands in for this window's panes while open, like Usage and Agents (they take turns). Per window, not saved.
 export const skills = $state({
@@ -26,7 +27,7 @@ export const skills = $state({
 
 export function toggleSkills() {
   skills.open = !skills.open;
-  if (skills.open) (closeUsage(), closeAgents(), closeSettings(), closeMcp());
+  if (skills.open) (closeUsage(), closeAgents(), closeSettings(), closeMcp(), closeWar());
 }
 export const closeSkills = () => (skills.open = false);
 

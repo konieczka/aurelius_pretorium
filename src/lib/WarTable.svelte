@@ -3,7 +3,7 @@
   import type { Row as UsageRow } from "./usageStats";
   import type { Stats } from "./war";
 
-  // Shared by every War Table (one per workspace at most): project stats are slow to count, so each project's are
+  // Kept between openings of the War Table: project stats are slow to count, so each project's are
   // kept for a few minutes; token rows come from the same logs the Usage view reads.
   const STATS_TTL = 5 * 60_000;
   const statsOf = $state<Record<string, Stats>>({});
@@ -30,27 +30,26 @@
     usage.rows = await invoke<UsageRow[]>("usage_stats", { days: 30 }).catch(() => usage.rows);
   }
 
-  // Where each table was looking, per view, while its tab is closed or switched away from
+  // Where the table was looking, per view, while it's closed or switched away from
   const views = new Map<string, { x: number; y: number; k: number; auto: boolean }>();
 </script>
 
 <script lang="ts">
   import { untrack } from "svelte";
   import { GitBranch, MessageCircleQuestion, ShieldQuestion } from "@lucide/svelte";
-  import type { Tab } from "./layout";
   import { agentProvider, shells } from "./agents.svelte";
   import { fleetRows, fmtSpan, STATUSES, type Row, type Status } from "./fleet";
-  import { allTabs, app, openBrowser, ownerOf, refreshRepo } from "./state.svelte";
-  import { folderOf, nameOf, showTab, tabsIn, ws } from "./workspaces.svelte";
+  import { app, openBrowser, ownerOf, refreshRepo } from "./state.svelte";
+  import { activate, folderOf, nameOf, ownerWindow, showTab, tabsIn, ws } from "./workspaces.svelte";
   import { infra, refreshInfra, webContainerPort, webPort } from "./Infra.svelte";
   import { providerName, rangeStart } from "./usageStats";
   import { buildProjects, castraLayout, frontLayout, tally, tokensByProject, union, F, type Project, type Rect, type Service, type WarView } from "./war";
   import ProviderIcon from "./ProviderIcon.svelte";
   import WarCastra from "./WarCastra.svelte";
   import WarFront from "./WarFront.svelte";
+  import { setWarView, war } from "./warView.svelte";
 
-  let { tab }: { tab: Tab & { kind: "war" } } = $props();
-  const view = $derived<WarView>(tab.view ?? "castra");
+  const view = $derived<WarView>(war.view);
 
   // ---- data: Fleet's agents, the Servers scan, every workspace's folder ----
   const rows = $derived.by(() => {
@@ -156,7 +155,7 @@
   const fitProject = (key: string) => (front ? fitRect(rects[key], 0.045, 1.1, 360) : fitRect(rects[key], 0.12, 1.1));
 
   // Back where this table was looking in this view; else fitted (and kept fitted as it grows)
-  const viewKey = $derived(`${tab.id}:${view}`);
+  const viewKey = $derived(view);
   $effect(() => {
     const saved = views.get(viewKey);
     untrack(() => {
@@ -252,8 +251,14 @@
     const s = serviceOf(id);
     const port = s && (s.listener ? webPort(s.listener) : s.container ? webContainerPort(s.container) : undefined);
     const w = s?.tab ? workspaceOf(s.tab) : undefined;
-    if (port) openBrowser(`http://localhost:${port}`);
-    else if (s?.tab && w) showTab(w, s.tab);
+    if (port) {
+      // In the workspace of the server's project (its terminal's, else the one showing its folder), unless another
+      // window has that one
+      const key = projects.find((p) => p.services.some((x) => x.id === id))?.key;
+      const home = w ?? ws.all.find((m) => key && keyOf(folderOf(m.id)) === key)?.id;
+      if (home && !ownerWindow(home)) activate(home);
+      openBrowser(`http://localhost:${port}`);
+    } else if (s?.tab && w) showTab(w, s.tab);
   }
   function serviceAction(s: Service) {
     const port = s.listener ? webPort(s.listener) : s.container ? webContainerPort(s.container) : undefined;
@@ -307,16 +312,11 @@
   const count = $derived(tally(rows));
   const up = $derived(projects.reduce((n, p) => n + p.services.filter((s) => s.up).length, 0));
   const servers = $derived(projects.reduce((n, p) => n + p.services.length, 0));
-  // Written to the workspace's own tab (the saved layout), not the prop
-  function setView(w: WarView) {
-    const t = allTabs().find((x) => x.id === tab.id);
-    if (t?.kind === "war") t.view = w === "castra" ? undefined : w;
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <section
-  class="war"
+  class="war slab"
   data-lod={lod}
   data-view={view}
   class:focusing={!!focus}
@@ -353,8 +353,8 @@
 
   <div class="hud bar">
     <div class="seg" role="group" aria-label="Layout">
-      <button type="button" aria-pressed={view === "castra"} onclick={() => setView("castra")} title="A walled camp per project: agents as coins, servers on its wall">Castra</button>
-      <button type="button" aria-pressed={view === "front"} onclick={() => setView("front")} title="Bands by urgency across every project: what needs you is on top">Front line</button>
+      <button type="button" aria-pressed={view === "castra"} onclick={() => setWarView("castra")} title="A walled camp per project: agents as coins, servers on its wall">Castra</button>
+      <button type="button" aria-pressed={view === "front"} onclick={() => setWarView("front")} title="Bands by urgency across every project: what needs you is on top">Front line</button>
     </div>
     <p class="sum">
       {#each STATUSES.filter((s) => count[s]) as s (s)}<span class="tally" class:hot={s === "attention"}><span class="glyph {s}"></span>{count[s]} {heading[s].toLowerCase()}</span>{/each}
@@ -426,9 +426,12 @@
     --ember-edge: oklch(0.7 0.17 50 / 42%);
     --ok: var(--diff-add-gutter);
     --ease: var(--ease-out-quint);
+    /* Plane 2: a slab standing in for the panes, as Usage does */
+    grid-column: 2;
+    grid-row: 2;
     position: relative;
-    width: 100%;
-    height: 100%;
+    min-width: 0;
+    min-height: 0;
     overflow: hidden;
     background: var(--surface);
     touch-action: none;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw, Rows2, Server, Swords, Columns2, UnfoldHorizontal } from "@lucide/svelte";
+  import { ArrowDown, ArrowUp, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, FilePlus, Files, GitBranch, FolderOpen, FolderPlus, FolderRoot, RefreshCw, Rows2, Server, Columns2, UnfoldHorizontal } from "@lucide/svelte";
   import { zoom } from "$lib/zoom";
   import Node from "$lib/Node.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
@@ -32,9 +32,11 @@
   import NewAgent from "$lib/NewAgent.svelte";
   import GalleyIcon from "$lib/GalleyIcon.svelte";
   import Settings from "$lib/Settings.svelte";
+  import WarTable from "$lib/WarTable.svelte";
+  import { closeWar, toggleWar, war } from "$lib/warView.svelte";
   import { closeSettings, settings, toggleSettings } from "$lib/settingsView.svelte";
   import {
-    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, undoTree, newTerminal, newNote, openBrowser, openWarTable, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
+    app, activeTab, closeTab, deleteSelected, forgetFolder, clipFile, paste, undoTree, newTerminal, newNote, openBrowser, openWorkspace, splitFocused, startCreate, toggleFleet, toggleSidebar,
     isShown, showMode, sidebarModes, toggleSidebarRows, toggleUnfold, type SidebarMode,
   } from "$lib/state.svelte";
 
@@ -119,7 +121,8 @@
       k === "a" && e.shiftKey ? toggleAgents :
       k === "w" && agents.open ? closeAgents :
       k === "j" && e.shiftKey ? toggleFleet :
-      k === "y" && e.shiftKey ? openWarTable :
+      k === "y" && e.shiftKey ? toggleWar :
+      k === "w" && war.open ? closeWar :
       k === "s" && agents.open ? saveAgentFile :
       k === "t" && e.shiftKey ? () => openBrowser() :
       k === "t" ? newTerminal :
@@ -149,7 +152,6 @@
     <button class="icon-btn" onclick={() => app.treeVersion++} title="Refresh"><RefreshCw size={14} strokeWidth={1.5} /></button>
     <button class="icon-btn" onclick={() => (app.expanded = {})} title="Collapse all folders"><ChevronsDownUp size={14} strokeWidth={1.5} /></button>
   {:else if m === "fleet"}
-    <button class="icon-btn" onclick={openWarTable} title="War Table: every project's agents and servers on one canvas (⇧⌘Y)"><Swords size={14} strokeWidth={1.5} /></button>
     <NewAgent review />
     <NewAgent />
   {:else if m === "git" && git.root}
@@ -235,9 +237,9 @@
         {/each}
       </div>
     </aside>
-    <!-- The Usage, Skills, MCP, Agents and Settings views stand in for the panes; they stay mounted (terminals keep running) -->
-    <main class:away={usage.open || skills.open || mcp.open || agents.open || settings.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
-    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if mcp.open}<Mcp />{:else if agents.open}<AgentSettings />{:else if settings.open}<Settings />{/if}
+    <!-- The Usage, Skills, MCP, Agents, Settings and War Table views stand in for the panes; they stay mounted (terminals keep running) -->
+    <main class:away={usage.open || skills.open || mcp.open || agents.open || settings.open || war.open} onpointerdown={() => (app.treeFocused = false)}><Node bind:node={app.root} /></main>
+    {#if usage.open}<Usage />{:else if skills.open}<Skills />{:else if mcp.open}<Mcp />{:else if agents.open}<AgentSettings />{:else if settings.open}<Settings />{:else if war.open}<WarTable />{/if}
     <StatusBar />
   </div>
   <QuickPick />

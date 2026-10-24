@@ -7,10 +7,11 @@ import { disposeBrowser, focusAddress } from "./Browser.svelte";
 import { hasPreview, isDrawing } from "./media";
 import { closeUsage } from "./usageView.svelte";
 import { closeSkills } from "./skillsView.svelte";
+import { closeWar } from "./warView.svelte";
 import { shells } from "./agents.svelte";
 
-/** Opening a tab brings the panes back from the Usage or Skills view. */
-const closeViews = () => (closeUsage(), closeSkills());
+/** Opening a tab brings the panes back from the Usage, Skills or War Table view. */
+const closeViews = () => (closeUsage(), closeSkills(), closeWar());
 
 // localStorage is shared by all windows of the app.
 export const store = {
@@ -61,8 +62,8 @@ const under = (p: string, root: string) => p === root || p.startsWith(root + "/"
 /** The opened folder a path belongs to (deepest match); if none, the path itself for a folder, else its parent dir. */
 export const ownerOf = (path: string, dir = false) =>
   app.recent.filter((r) => under(path, r)).sort((a, b) => b.length - a.length)[0] ?? (dir ? path : path.slice(0, path.lastIndexOf("/")));
-const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" || t.kind === "war" ? "" : t.kind === "db" ? t.target.root : t.path);
-/** Folder a tab belongs to ("" for an unsaved note, a web page or the War Table). A terminal's follows its shell's `cd`. */
+const tabPath = (t: L.Tab) => (t.kind === "term" ? t.cwd : t.kind === "web" ? "" : t.kind === "db" ? t.target.root : t.path);
+/** Folder a tab belongs to ("" for an unsaved note or a web page). A terminal's follows its shell's `cd`. */
 export const tabOwner = (t: L.Tab) => (tabPath(t) ? ownerOf(tabPath(t), t.kind === "term") : "");
 /** Folder whose checkout (worktree / branch) a tab shows: a terminal's own directory, as an agent may have moved into
  * a worktree nested in the opened folder (e.g. .claude/worktrees/x); else the folder it belongs to. */
@@ -229,17 +230,6 @@ export function openDb(target: L.DbTarget, name: string) {
   if (existing) return activate(existing.id);
   const p = focusedPane();
   p.tabs.push({ id: L.uid(), kind: "db", name, target });
-  p.active = p.tabs.length - 1;
-  app.focused = p.id;
-}
-
-/** The War Table: brought up if this workspace has one, else opened in the focused pane. */
-export function openWarTable() {
-  closeViews();
-  const existing = allTabs().find((t) => t.kind === "war");
-  if (existing) return app.minimized.some((m) => m.tab.id === existing.id) ? restoreTab(existing.id) : activate(existing.id);
-  const p = focusedPane();
-  p.tabs.push({ id: L.uid(), kind: "war" });
   p.active = p.tabs.length - 1;
   app.focused = p.id;
 }

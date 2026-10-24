@@ -11,9 +11,7 @@ export type Tab =
   // cookies and saved logins), settled when it first opens one ("" none); folder: the one it was opened from, until then
   | { id: string; kind: "web"; url: string; title?: string; project?: string; folder?: string }
   // a database on this machine (see db/); name: what the tab says; write: statements may change data
-  | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean }
-  // the War Table: every project's agents and servers on one canvas; view: how it's laid out (Castra unless set)
-  | { id: string; kind: "war"; view?: "castra" | "front" };
+  | { id: string; kind: "db"; name: string; target: DbTarget; write?: boolean };
 /** Where a database is: a server's port, a container (exec'd into without one), or a SQLite file. root: its project. */
 export type DbTarget = {
   engine: "postgres" | "mysql" | "redis" | "mongo" | "sqlite";
@@ -204,7 +202,7 @@ export function restore(root: Split, m: Minimized): Pane {
 type Raw = any;
 const str = (v: unknown) => typeof v === "string";
 export const isTab = (t: Raw): t is Tab =>
-  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : t.kind === "db" ? str(t.name) && str(t.target?.engine) && str(t.target?.root) : t.kind === "war" ? true : (t.kind === "file" || t.kind === "diff") && str(t.path));
+  !!t && str(t.id) && (t.kind === "term" ? str(t.cwd) : t.kind === "web" ? str(t.url) : t.kind === "db" ? str(t.name) && str(t.target?.engine) && str(t.target?.root) : (t.kind === "file" || t.kind === "diff") && str(t.path));
 function isNode(n: Raw): n is LNode {
   if (n?.type === "pane") return str(n.id) && Array.isArray(n.tabs) && n.tabs.every(isTab) && Number.isInteger(n.active);
   return (
@@ -214,4 +212,19 @@ function isNode(n: Raw): n is LNode {
   );
 }
 export const isRoot = (n: unknown): n is Split => isNode(n) && (n as LNode).type === "split";
+/** Takes tabs of kinds that are no longer tabs out of a stored layout, before it's checked: the War Table (now a view
+ * of its own, like Usage). Panes left empty go, as when their last tab is closed. */
+export function dropRetired(root: Raw) {
+  const gone = (t: Raw) => t?.kind === "war";
+  const emptied: string[] = [];
+  const walk = (n: Raw) => {
+    if (n?.type === "pane" && Array.isArray(n.tabs) && n.tabs.some(gone)) {
+      n.tabs = n.tabs.filter((t: Raw) => !gone(t));
+      n.active = Math.max(0, Math.min(n.active, n.tabs.length - 1));
+      if (!n.tabs.length) emptied.push(n.id);
+    } else if (Array.isArray(n?.children)) n.children.forEach(walk);
+  };
+  walk(root);
+  if (isRoot(root)) emptied.forEach((id) => removePane(root, id));
+}
 export const isMinimized = (m: Raw): m is Minimized => !!m && isTab(m.tab) && str(m.pane) && Number.isInteger(m.index);
