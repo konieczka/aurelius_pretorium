@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
 mod agent_config;
+mod claude_theme;
 mod db;
 #[cfg(feature = "e2e")]
 pub mod harness;
@@ -234,8 +235,10 @@ fn pty_write(ptys: State<Ptys>, id: String, data: String) -> Res<()> {
     let s = map.get(&id).ok_or("no such pty")?;
     let mut o = s.out.lock().unwrap();
     o.input = Some(Instant::now());
-    // Answered (or dismissed). Focus and theme reports the terminal sends by itself don't count.
-    if !matches!(data.as_str(), "\x1b[I" | "\x1b[O" | "\x1b[?997;1n" | "\x1b[?997;2n") {
+    // Answered (or dismissed). Focus and theme reports the terminal sends by itself don't count, nor its answers to
+    // colour queries (OSC 10/11: Claude Code asks on every theme report) and to whether theme reports are on.
+    let reply = data.starts_with("\x1b]10;") || data.starts_with("\x1b]11;") || data.starts_with("\x1b[?2031;");
+    if !reply && !matches!(data.as_str(), "\x1b[I" | "\x1b[O" | "\x1b[?997;1n" | "\x1b[?997;2n") {
         o.asks.typed();
     }
     drop(o);
@@ -1262,6 +1265,7 @@ pub fn run() {
         })
         .setup(|app| {
             std::thread::spawn(hooks::install);
+            std::thread::spawn(claude_theme::follow);
             let h = app.handle().clone();
             std::thread::spawn(move || flush_holding(&h));
             let h = app.handle().clone();

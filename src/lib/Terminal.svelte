@@ -51,6 +51,20 @@
   // app's theme changes. xterm.js has no support for it, so a running agent kept the colours of the theme it started in.
   const themeReport = () => `\x1b[?997;${theme.dark ? 1 : 2}n`;
   $effect.root(() => {
+    // Every terminal's colours, shown or not: on a report the agent asks the background (OSC 11), and a hidden one
+    // answered with its old theme's. Before the reports, so it's already changed. Fades only the ones on screen.
+    $effect(() => {
+      void theme.palette;
+      const animating = theme.transitioning;
+      let frame = 0;
+      const update = () => {
+        const t = termTheme();
+        for (const e of entries.values()) if (!animating || e.host.isConnected) e.term.options.theme = t;
+        if (animating) frame = requestAnimationFrame(update);
+      };
+      update();
+      return () => cancelAnimationFrame(frame);
+    });
     $effect(() => {
       const report = themeReport();
       for (const e of entries.values()) if (e.themeReports) e.send(report);
@@ -196,6 +210,8 @@
     term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => (has2031(params) && (e.themeReports = true), false));
     term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => (has2031(params) && (e.themeReports = false), false));
     term.parser.registerCsiHandler({ prefix: "?", final: "n" }, (params) => params[0] === 996 && (e.send(themeReport()), true));
+    // Whether it's supported (DECRQM; OpenCode asks): xterm.js would say it doesn't know the mode. 1 = on, 2 = off.
+    term.parser.registerCsiHandler({ prefix: "?", intermediates: "$", final: "p" }, (params) => params[0] === 2031 && (e.send(`\x1b[?2031;${e.themeReports ? 1 : 2}$y`), true));
     term.parser.registerEscHandler({ final: "c" }, () => ((e.themeReports = false), false)); // `reset`, after an agent that crashed with it on
     term.onResize(({ cols, rows }) => e.ready && invoke("pty_resize", { id, cols, rows }).catch(() => {}));
     // Bells and notification escapes are read by the backend (status.rs), for every shell, shown or not.
@@ -219,20 +235,6 @@
     const ro = new ResizeObserver(() => el.clientWidth && e.fit.fit());
     ro.observe(el);
     return () => ro.disconnect();
-  });
-
-  $effect(() => {
-    const e = entries.get(tabId);
-    void theme.palette;
-    const animating = theme.transitioning;
-    if (!e) return;
-    let frame = 0;
-    const update = () => {
-      e.term.options.theme = termTheme();
-      if (animating) frame = requestAnimationFrame(update);
-    };
-    update();
-    return () => cancelAnimationFrame(frame);
   });
 </script>
 
