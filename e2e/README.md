@@ -10,6 +10,7 @@ Scenarios for the Servers panel's database tabs, one file per phase:
 | `tests/4-mongo-sqlite-agent.e2e.ts` | Mongo through `mongosh` in its container; the project's SQLite files; asking the coding agent |
 | `tests/5-terminal-links.e2e.ts` | File paths in a terminal's output as links: a file opens in a tab beside it, at its line if one is given; paths that aren't files stay text |
 | `tests/6-terminal-theme.e2e.ts` | Theme reports to a terminal's program (mode 2031, which Claude Code follows): asked for, on each light/dark change while it's on, and whether they're on (DECRQM); a terminal in a hidden tab answers OSC 11 with the current theme's background |
+| `tests/7-war-table.e2e.ts` | The War Table over the whole window, from the top bar; projects holding their places as agents change state, in the workspaces' order or one arranged by dragging (kept, for both views); a click on an agent bringing up its terminal in its own workspace. Its page, `/e2e/war`, is the whole app on three seeded workspaces, with no harness or Docker behind it: agents' states come from `window.__e2eShells` |
 
 They use the [e2e](https://e2e.tester.army/docs) framework with exact locators only: no AI model, no sign-in.
 
