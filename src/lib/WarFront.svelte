@@ -55,7 +55,7 @@
     {@const branch = info.branch(l.key)}
     {@const shares = s ? langShares(s) : []}
     <div class="lane" data-project={l.key} class:dim={focus && focus !== l.key} style:transform="translateX({l.x}px)" style:height="{layout.h}px"></div>
-    <div class="head" data-project={l.key} data-project-hit={l.key} class:dim={focus && focus !== l.key} class:lit={focus === l.key} style:transform="translateX({l.x}px)" title={l.key}>
+    <div class="head" data-project={l.key} data-project-hit={l.key} class:dim={focus && focus !== l.key} class:lit={focus === l.key} style:transform="translateX({l.x}px)" title="{l.key}\nDrag sideways to move the column">
       <div class="hin">
         <div class="name">{p.name}</div>
         <div class="branch">{#if branch}<GitBranch size={11} strokeWidth={1.5} /><span>{branch}</span>{/if}</div>

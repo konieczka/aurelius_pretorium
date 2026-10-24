@@ -43,11 +43,11 @@
   import { activate, folderOf, nameOf, ownerWindow, showTab, tabsIn, ws } from "./workspaces.svelte";
   import { infra, refreshInfra, webContainerPort, webPort } from "./Infra.svelte";
   import { providerName, rangeStart } from "./usageStats";
-  import { buildProjects, castraLayout, frontLayout, tally, tokensByProject, union, F, type Project, type Rect, type Service, type WarView } from "./war";
+  import { buildProjects, castraLayout, frontLayout, laneOrder, moveKey, tally, tokensByProject, union, F, type Project, type Rect, type Service, type WarView } from "./war";
   import ProviderIcon from "./ProviderIcon.svelte";
   import WarCastra from "./WarCastra.svelte";
   import WarFront from "./WarFront.svelte";
-  import { setWarView, war } from "./warView.svelte";
+  import { setWarOrder, setWarView, war } from "./warView.svelte";
 
   const view = $derived<WarView>(war.view);
 
@@ -69,6 +69,14 @@
   };
   const projects = $derived(buildProjects(rows, infra.scan?.listeners ?? [], infra.scan?.containers ?? [], folders, keyOf));
   const keys = $derived(projects.map((p) => p.key));
+  // Camps and columns hold still as agents change state: in the order arranged by hand, else the workspaces' (this
+  // window's bar, then the rest)
+  const wsKeys = $derived.by(() => {
+    void shells.polled;
+    const ids = [...ws.open, ...ws.all.map((m) => m.id).filter((id) => !ws.open.includes(id))];
+    return [...new Set(ids.map(folderOf).filter(Boolean).map(keyOf))];
+  });
+  const lanes = $derived(laneOrder(projects, war.order, wsKeys));
 
   // Branches and checkouts of every folder in sight, looked up once and every 15s (agents switch branches)
   const paths = $derived([...new Set([...rows.map((r) => r.cwd), ...folders, ...(infra.scan?.listeners ?? []).map((l) => l.root), ...(infra.scan?.containers ?? []).map((c) => c.root)].filter(Boolean))]);
@@ -104,8 +112,8 @@
     ro.observe(el);
     return () => ro.disconnect();
   });
-  const camps = $derived(view === "castra" ? castraLayout(projects, sw || 1200, sh || 800) : []);
-  const front = $derived(view === "front" ? frontLayout(projects) : null);
+  const camps = $derived(view === "castra" ? castraLayout(lanes, sw || 1200, sh || 800) : []);
+  const front = $derived(view === "front" ? frontLayout(lanes) : null);
   const rects = $derived.by((): Record<string, Rect> => {
     if (front) return Object.fromEntries(front.lanes.map((l) => [l.key, { x: l.x, y: 0, w: F.LANE_W, h: front.h }]));
     return Object.fromEntries(camps.map((c) => [c.key, { x: c.x, y: c.y, w: c.w, h: c.h }]));
@@ -182,12 +190,38 @@
 
   let drag: { x: number; y: number; vx: number; vy: number; moved: boolean } | null = null;
   const onItem = (e: Event) => !!(e.target as Element).closest("[data-agent], [data-service], [data-project-hit], .hud");
+  // A project moved by its head (Front line, live as it's dragged sideways) or its camp's plate (Castra, into the
+  // place of the camp it's dropped on); kept for next time, in both views
+  let arranging = $state<{ key: string; x: number; y: number; moved: boolean } | null>(null);
+  let dropOn = $state(""); // Castra: the camp it would take the place of
+  let arranged = false; // the click that ends a drag doesn't also focus the column
   function pointerdown(e: PointerEvent) {
+    arranged = false;
+    const head = e.button === 0 ? (e.target as Element).closest<HTMLElement>("[data-project-hit]") : null;
+    if (head) {
+      arranging = { key: head.dataset.projectHit!, x: e.clientX, y: e.clientY, moved: false };
+      return stage?.setPointerCapture(e.pointerId);
+    }
     if (e.button !== 0 || onItem(e)) return;
     drag = { x: e.clientX, y: e.clientY, vx: v.x, vy: v.y, moved: false };
     stage?.setPointerCapture(e.pointerId);
   }
   function pointermove(e: PointerEvent) {
+    if (arranging) {
+      if (Math.abs(e.clientX - arranging.x) + Math.abs(e.clientY - arranging.y) > 4) arranging.moved = true;
+      if (!arranging.moved) return;
+      const r = stage!.getBoundingClientRect();
+      const wx = (e.clientX - r.left - v.x) / v.k, wy = (e.clientY - r.top - v.y) / v.k;
+      if (!front) {
+        const key = arranging.key;
+        dropOn = Object.entries(rects).find(([k, b]) => k !== key && wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h)?.[0] ?? "";
+        return;
+      }
+      const order = lanes.map((p) => p.key);
+      const to = Math.max(0, Math.min(order.length - 1, Math.floor(wx / (F.LANE_W + F.GAP))));
+      if (order.indexOf(arranging.key) !== to) setWarOrder(moveKey(order, arranging.key, to));
+      return;
+    }
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
@@ -196,6 +230,11 @@
     placeCard(e);
   }
   function pointerup() {
+    if (arranging) {
+      const order = lanes.map((p) => p.key);
+      if (dropOn) setWarOrder(moveKey(order, arranging.key, order.indexOf(dropOn)));
+      (arranged = arranging.moved), (arranging = null), (dropOn = "");
+    }
     if (drag && !drag.moved) (focus = ""), (selected = "");
     drag = null;
   }
@@ -207,7 +246,10 @@
     else cancelAnimationFrame(frame), (v.x -= e.deltaX), (v.y -= e.deltaY), (auto = false);
   }
   function click(e: MouseEvent) {
+    if (arranged) return void (arranged = false);
     const item = (e.target as Element).closest<HTMLElement>("[data-agent], [data-service]");
+    // An agent with a tab goes straight to its terminal
+    if (item?.dataset.agent && agentOf(item.dataset.agent)?.ws) return openAgent(item.dataset.agent);
     if (item) {
       const key = projectOfItem(item);
       selected = item.dataset.agent || item.dataset.service || "";
@@ -241,7 +283,8 @@
     if (act) e.preventDefault(), act();
   }
 
-  // Double-click (or Enter): an agent's terminal; a server's page, else the terminal it runs in
+  // An agent opens its terminal on a click (or Enter); a server its page, else the terminal it runs in, on a
+  // double-click (or Enter)
   function openAgent(id: string) {
     const r = agentOf(id);
     if (r?.ws) showTab(r.ws, r.id);
@@ -320,6 +363,7 @@
   data-lod={lod}
   data-view={view}
   class:focusing={!!focus}
+  class:arranging={arranging?.moved}
   bind:this={stage}
   style:--k={v.k}
   style:--ik={1 / v.k}
@@ -340,9 +384,9 @@
   <div class="bg"></div>
   {#if projects.length}
     {#if front}
-      <WarFront {projects} layout={front} {info} {v} {focus} {selected} />
+      <WarFront projects={lanes} layout={front} {info} {v} {focus} {selected} />
     {:else}
-      <WarCastra {projects} {camps} {info} {v} {focus} {selected} />
+      <WarCastra projects={lanes} {camps} {info} {v} {focus} {selected} lifted={arranging?.moved ? arranging.key : ""} {dropOn} />
     {/if}
   {:else if shells.polled}
     <div class="empty">
@@ -356,6 +400,11 @@
       <button type="button" aria-pressed={view === "castra"} onclick={() => setWarView("castra")} title="A walled camp per project: agents as coins, servers on its wall">Castra</button>
       <button type="button" aria-pressed={view === "front"} onclick={() => setWarView("front")} title="Bands by urgency across every project: what needs you is on top">Front line</button>
     </div>
+    {#if war.order.length}
+      <div class="seg">
+        <button type="button" onclick={() => setWarOrder([])} title="Put the projects back in the order of the workspaces">Workspace order</button>
+      </div>
+    {/if}
     <p class="sum">
       {#each STATUSES.filter((s) => count[s]) as s (s)}<span class="tally" class:hot={s === "attention"}><span class="glyph {s}"></span>{count[s]} {heading[s].toLowerCase()}</span>{/each}
       {#if servers}<span class="tally"><span class="glyph up"></span>{up} of {servers} servers up</span>{/if}
@@ -397,7 +446,7 @@
           <dt>Folder</dt><dd>{base(repo?.root || r.cwd)}</dd>
           {#if repo?.branch}<dt>Branch</dt><dd class="br"><GitBranch size={11} strokeWidth={1.5} />{repo.branch}</dd>{/if}
         </dl>
-        {#if r.ws}<p class="hint">Double-click to open its terminal</p>{/if}
+        {#if r.ws}<p class="hint">Click to open its terminal</p>{/if}
       {:else if hoverService}
         {@const s = hoverService}
         {@const by = s.agent ? agentOf(s.agent) : undefined}
@@ -532,6 +581,10 @@
     position: absolute;
     z-index: 3;
     cursor: default;
+  }
+  .war.arranging,
+  .war.arranging :global(*) {
+    cursor: grabbing;
   }
   .bar {
     left: 10px;

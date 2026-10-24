@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildProjects, castraLayout, CARD_H, F, frontLayout, langShares, tokensByProject } from "./war";
+import { buildProjects, castraLayout, CARD_H, F, frontLayout, langShares, laneOrder, moveKey, tokensByProject } from "./war";
 import type { Row } from "./fleet";
 import type { Container, Listener } from "./Infra.svelte";
 import type { Row as UsageRow } from "./usageStats";
@@ -66,4 +66,17 @@ test("front line stacks cards in their band and sizes bands to the tallest stack
   expect(f.cards.b1.y).toBe(f.bands.work.y + F.PT);
   expect(f.cards.i1.y).toBe(f.bands.rear.y + F.PT);
   expect(f.links.map((l) => [l.agent, l.service])).toEqual([["b1", "p1"]]);
+});
+
+test("projects keep their places on the table when agents change state: hand order, then workspaces, then name", () => {
+  const p = (key: string, status: Row["status"] = "idle") => ({ key, name: key.slice(1), agents: [row(key, key, { status })], services: [] });
+  const keys = (ps: { key: string }[]) => ps.map((x) => x.key);
+  const quiet = [p("/c"), p("/a"), p("/z"), p("/b")];
+  const loud = [p("/c"), p("/a", "attention"), p("/z", "busy"), p("/b")];
+  expect(keys(laneOrder(quiet, [], ["/b", "/c"]))).toEqual(["/b", "/c", "/a", "/z"]);
+  expect(keys(laneOrder(loud, [], ["/b", "/c"]))).toEqual(["/b", "/c", "/a", "/z"]);
+  expect(keys(laneOrder(loud, ["/z", "/b"], ["/b", "/c"]))).toEqual(["/z", "/b", "/c", "/a"]);
+  expect(moveKey(["/a", "/b", "/c"], "/a", 2)).toEqual(["/b", "/c", "/a"]);
+  expect(moveKey(["/a", "/b", "/c"], "/c", 0)).toEqual(["/c", "/a", "/b"]);
+  expect(moveKey(["/a", "/b"], "/a", 9)).toEqual(["/b", "/a"]);
 });

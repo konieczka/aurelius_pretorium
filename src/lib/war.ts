@@ -65,6 +65,25 @@ export function buildProjects(rows: Row[], listeners: Listener[], containers: Co
   });
 }
 
+/** Projects in an order that holds still, for Castra's camps and the Front line's columns alike: as arranged by hand,
+ * else as their workspaces are, then by name. Agents changing state never move a project. */
+export function laneOrder(projects: Project[], arranged: string[], workspaces: string[]): Project[] {
+  const at = (key: string) => {
+    const i = arranged.indexOf(key);
+    if (i >= 0) return i;
+    const j = workspaces.indexOf(key);
+    return j >= 0 ? arranged.length + j : Infinity;
+  };
+  return [...projects].sort((a, b) => at(a.key) - at(b.key) || a.name.localeCompare(b.name));
+}
+
+/** `keys` with `key` moved to position `to`. */
+export function moveKey(keys: string[], key: string, to: number): string[] {
+  const rest = keys.filter((k) => k !== key);
+  rest.splice(Math.max(0, Math.min(to, rest.length)), 0, key);
+  return rest;
+}
+
 export function tally(agents: Row[]): Record<Status, number> {
   const t = { attention: 0, busy: 0, idle: 0, asleep: 0 };
   for (const a of agents) t[a.status]++;
@@ -188,7 +207,7 @@ function camp(p: Project): Omit<Camp, "x" | "y"> {
   return { key: p.key, w, h: towers.length ? plateH + T : plateH, plateH, units, towers: placed, roads };
 }
 
-/** Shelf-pack the camps in order (most urgent front-left), at the row width that fills a `sw`×`sh` stage best. */
+/** Shelf-pack the camps in order (the first top-left), at the row width that fills a `sw`×`sh` stage best. */
 export function castraLayout(projects: Project[], sw: number, sh: number): Camp[] {
   const items = projects.map(camp);
   if (!items.length) return [];

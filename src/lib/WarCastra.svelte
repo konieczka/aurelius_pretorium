@@ -9,13 +9,15 @@
 
   // Castra: every project a walled camp on the survey grid. Agents stand inside as coins in ranks (sorted by
   // urgency), its servers and containers are towers set into the wall, and roads run from a coin to what it started.
-  let { projects, camps, info, v, focus, selected }: {
+  let { projects, camps, info, v, focus, selected, lifted = "", dropOn = "" }: {
     projects: Project[];
     camps: Camp[];
     info: { stats: Record<string, Stats>; tokens: Map<string, Tokens>; branch: (key: string) => string };
     v: { x: number; y: number; k: number };
     focus: string;
     selected: string;
+    lifted?: string; // the camp being dragged to a new place
+    dropOn?: string; // the camp whose place it would take
   } = $props();
 
   const byKey = $derived(new Map(projects.map((p) => [p.key, p])));
@@ -40,8 +42,8 @@
     {@const branch = info.branch(c.key)}
     {@const units = new Map(c.units.map((u) => [u.id, u]))}
     {@const towers = new Map(c.towers.map((u) => [u.id, u]))}
-    <div class="camp" data-project={c.key} class:dim={focus && focus !== c.key} class:lit={focus === c.key} class:hot={t.attention > 0} style:transform="translate({c.x}px, {c.y}px)" style:width="{c.w}px" style:height="{c.h}px">
-      <div class="plate" data-project-hit={c.key} style:height="{c.plateH}px">
+    <div class="camp" data-project={c.key} class:dim={focus && focus !== c.key} class:lit={focus === c.key} class:hot={t.attention > 0} class:lifted={lifted === c.key} class:drop={dropOn === c.key} style:transform="translate({c.x}px, {c.y}px)" style:width="{c.w}px" style:height="{c.h}px">
+      <div class="plate" data-project-hit={c.key} title="Drag onto another camp to put it in that one's place" style:height="{c.plateH}px">
         <div class="head">
           <div class="h1"><h3 class="name" title={c.key}>{p.name}</h3><span class="tally" title={tallyTitle(t)}>{@render tallies(t, false)}</span></div>
           <div class="branch">{#if branch}<GitBranch size={12} strokeWidth={1.5} /><span class="bn">{branch}</span>{/if}<span class="path">{home(c.key)}</span></div>
@@ -106,7 +108,13 @@
     position: absolute;
     left: 0;
     top: 0;
-    transition: opacity 220ms var(--ease), filter 220ms var(--ease);
+    transition: transform 420ms var(--ease), opacity 220ms var(--ease), filter 220ms var(--ease);
+  }
+  .camp.lifted {
+    opacity: 0.55;
+  }
+  .camp.drop .plate {
+    box-shadow: 0 0 0 2px var(--gold), 0 18px 36px -24px oklch(var(--shadow-tint) / 0.4);
   }
   .camp.dim {
     opacity: 0.22;
